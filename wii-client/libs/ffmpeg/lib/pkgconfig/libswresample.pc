@@ -1,0 +1,14 @@
+prefix=/workspace/kick-wii/libs-kw/ffmpeg
+exec_prefix=${prefix}
+libdir=/workspace/kick-wii/libs-kw/ffmpeg/lib
+includedir=/workspace/kick-wii/libs-kw/ffmpeg/include
+
+Name: libswresample
+Description: FFmpeg audio resampling library
+Version: 4.12.100
+Requires: libavutil >= 58.29.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lswresample -lm
+Libs.private: 
+Cflags: -I${includedir}

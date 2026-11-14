@@ -1,0 +1,14 @@
+prefix=/workspace/kick-wii/libs-kw/ffmpeg
+exec_prefix=${prefix}
+libdir=/workspace/kick-wii/libs-kw/ffmpeg/lib
+includedir=/workspace/kick-wii/libs-kw/ffmpeg/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 60.31.102
+Requires: libavutil >= 58.29.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavcodec -lm
+Libs.private: 
+Cflags: -I${includedir}

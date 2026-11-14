@@ -1,0 +1,14 @@
+prefix=/workspace/kick-wii/libs-kw/ffmpeg
+exec_prefix=${prefix}
+libdir=/workspace/kick-wii/libs-kw/ffmpeg/lib
+includedir=/workspace/kick-wii/libs-kw/ffmpeg/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 58.29.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -lm
+Libs.private: 
+Cflags: -I${includedir}

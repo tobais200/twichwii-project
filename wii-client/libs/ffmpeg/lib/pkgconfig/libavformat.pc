@@ -1,0 +1,14 @@
+prefix=/workspace/kick-wii/libs-kw/ffmpeg
+exec_prefix=${prefix}
+libdir=/workspace/kick-wii/libs-kw/ffmpeg/lib
+includedir=/workspace/kick-wii/libs-kw/ffmpeg/include
+
+Name: libavformat
+Description: FFmpeg container format library
+Version: 60.16.100
+Requires: libavcodec >= 60.31.102, libavutil >= 58.29.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavformat -lm
+Libs.private: 
+Cflags: -I${includedir}
