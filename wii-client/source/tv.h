@@ -17,7 +17,7 @@
 
 #include "clock_sync.h"
 
-#define TV_VERSION "1.2-rc4"
+#define TV_VERSION "1.2-rc5"
 #define TV_UA          "Mozilla/5.0 (Nintendo Wii; U; ; 3642; es) AppleWebKit/535.19 (KHTML, like Gecko) TwitchWii/" TV_VERSION
 #define TV_CFG_DIR     "sd:/apps/TwitchWii/"
 
