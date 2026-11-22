@@ -200,10 +200,10 @@ int sh_cfg_read(const char *name, char *buf, int sz) {
 }
 
 int sh_cfg_write(const char *name, const char *value) {
-    char path[160];
-    mkdir("sd:/apps", 0777);
-    mkdir("sd:/apps/TwitchWii", 0777);
-    snprintf(path, sizeof(path), TV_CFG_DIR "%s", name);
+    /* rc12: SD si esta montada, si no USB (antes solo sd:/). */
+    char d[2][96], path[192];
+    if (fs_data_dirs(TV_APP_NAME, d, 1) < 1) return -1;
+    snprintf(path, sizeof(path), "%s%s", d[0], name);
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
     fprintf(f, "%s\n", value);

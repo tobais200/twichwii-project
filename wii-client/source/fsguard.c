@@ -38,3 +38,24 @@ int __wrap__rename_r(struct _reent *r, const char *a, const char *b) {
 
 /* 1 si el dispositivo de la ruta ("sd:/..." o "usb:/...") esta montado. */
 int fs_dev_mounted(const char *path) { return dev_ok(path); }
+
+/* rc12: carpetas de datos de la app en los dispositivos montados, SD primero
+ * y despues USB. Con create!=0 crea <dev>:/apps y <dev>:/apps/<app> (mkdir
+ * ya pasa por el wrapper, asi que un dispositivo ausente nunca cuelga). */
+#include <stdio.h>
+#include <string.h>
+int fs_data_dirs(const char *app, char dirs[2][96], int create) {
+    static const char *devs[] = { "sd:/", "usb:/" };
+    int k = 0;
+    for (int i = 0; i < 2; i++) {
+        if (!dev_ok(devs[i])) continue;
+        snprintf(dirs[k], 96, "%sapps/%s/", devs[i], app);
+        if (create) {
+            char p[96];
+            snprintf(p, sizeof(p), "%sapps", devs[i]); mkdir(p, 0777);
+            snprintf(p, sizeof(p), "%.*s", (int)strlen(dirs[k]) - 1, dirs[k]); mkdir(p, 0777);
+        }
+        k++;
+    }
+    return k;
+}

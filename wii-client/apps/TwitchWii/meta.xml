@@ -2,8 +2,8 @@
 <app version="1">
   <name>TwitchWii</name>
   <coder>fans (no oficial)</coder>
-  <version>1.2-rc5</version>
-  <release_date>20261114</release_date>
+  <version>1.2-rc6</version>
+  <release_date>20261121</release_date>
   <short_description>Cliente NO oficial de Twitch para Wii</short_description>
   <long_description>Mira directos y videos de Twitch en tu Wii: inicio con canales en vivo, explorar categorias, buscar, pagina de canal, VODs y chat de solo lectura.
 
@@ -13,6 +13,6 @@ Controles: puntero + A elegir, 1 buscar, 2 actualizar, - idioma, + chat (viendo)
 
 No afiliado ni respaldado por Twitch Interactive, Inc. ni por Nintendo. Musica de la intro: Debussy, Reverie - David Hernando Vitores (CC BY-SA 4.0, Wikimedia Commons). Reutiliza reproductor, graficos y red de KickWii. FFmpeg (LGPL 2.1), libcurl, mbedTLS, zlib, libogc.
 
-RC 1.2-rc5: arreglado un cuelgue (pantalla roja) al guardar ajustes o la sesion sin tarjeta SD montada. Antes (1.2-rc4): en el reproductor con chat, la linea de estado (En vivo / Video / fps / vol) ya no queda tapada por las miniaturas: hay un espacio libre entre ambas, en 4:3 y 16:9. Antes (1.2-rc3): la fila Top categorias se desplaza con el resto de Inicio (ya no queda fija). Boton visible Iniciar sesion en la barra de arriba. Login QR con la app publica WiiStream (Client ID incluido; no hace falta una app por usuario ni secretos). Device Code Grant. Seguir/Suscribirse por QR a twitch.tv. Catalogo de categorias paginado (Helix /games/top con sesion, o top + paginas extra en modo directo) con box art en la Wii, busqueda de categorias y MEM2 para no llenar MEM1. Viendo un directo: 1 escribir, - seguir, 2 suscribirse, + pantalla completa. La Wii no realiza pagos.</long_description>
+RC 1.2-rc6: la sesion de Twitch queda guardada al salir y volver a entrar (en la SD, o en el USB si no hay SD); si el token vencio se renueva solo y el QR aparece solo si Twitch rechaza la renovacion. Margen seguro en los bordes para TVs que recortan la imagen (overscan), en 4:3 y 16:9. Antes (1.2-rc5): arreglado un cuelgue (pantalla roja) al guardar ajustes o la sesion sin tarjeta SD montada. Antes (1.2-rc4): en el reproductor con chat, la linea de estado (En vivo / Video / fps / vol) ya no queda tapada por las miniaturas: hay un espacio libre entre ambas, en 4:3 y 16:9. Antes (1.2-rc3): la fila Top categorias se desplaza con el resto de Inicio (ya no queda fija). Boton visible Iniciar sesion en la barra de arriba. Login QR con la app publica WiiStream (Client ID incluido; no hace falta una app por usuario ni secretos). Device Code Grant. Seguir/Suscribirse por QR a twitch.tv. Catalogo de categorias paginado (Helix /games/top con sesion, o top + paginas extra en modo directo) con box art en la Wii, busqueda de categorias y MEM2 para no llenar MEM1. Viendo un directo: 1 escribir, - seguir, 2 suscribirse, + pantalla completa. La Wii no realiza pagos.</long_description>
   <ahb_access />
 </app>

@@ -17,9 +17,13 @@
 
 #include "clock_sync.h"
 
-#define TV_VERSION "1.2-rc5"
+#define TV_VERSION "1.2-rc6"
 #define TV_UA          "Mozilla/5.0 (Nintendo Wii; U; ; 3642; es) AppleWebKit/535.19 (KHTML, like Gecko) TwitchWii/" TV_VERSION
 #define TV_CFG_DIR     "sd:/apps/TwitchWii/"
+#define TV_APP_NAME    "TwitchWii"
+/* fsguard.c */
+int fs_dev_mounted(const char *path);
+int fs_data_dirs(const char *app, char dirs[2][96], int create);
 
 /* ---- text.c ---- */
 int   cp_to_ascii(unsigned cp, char *out);
@@ -245,4 +249,5 @@ int  gfx_widescreen(void);
 int gfx_aspect_mode(void);
 void gfx_set_aspect(int mode);
 int gfx_pointer_x(int x);
+int gfx_pointer_y(int y);
 #endif

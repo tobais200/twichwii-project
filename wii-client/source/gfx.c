@@ -18,7 +18,93 @@ static int aspect_mode=0, system_wide=0;
 int gfx_canvas_width=640;
 int gfx_widescreen(void) { return aspect_mode?aspect_mode==2:system_wide; }
 int gfx_aspect_mode(void) { return aspect_mode; }
-int gfx_pointer_x(int x) { return x*SCR_W/FB_W; }
+/* rc12/rc6: zona segura para TVs con overscan (p. ej. Noblex). Todo el lienzo
+ * (SCR_W x 480, 4:3 o 16:9) se escala al 90% dentro de un rectangulo con margen
+ * de SAFE_X px a los lados y SAFE_Y px arriba/abajo del XFB de 640x480. Los
+ * margenes repiten el borde del lienzo, asi los fondos siguen llegando al borde
+ * y ningun texto/boton queda fuera de la pantalla. El video a pantalla completa
+ * sigue ocupando toda la pantalla (sobre el video el TV recorta igual). */
+#define SAFE_X 32
+#define SAFE_Y 24
+#define SAFE_W (FB_W - 2 * SAFE_X)
+#define SAFE_H (SCR_H - 2 * SAFE_Y)
+/* Mapas con filtro bilineal (pesos 0..255) para que el texto escalado no pierda trazos. */
+static short colmap[FB_W], colmap1[FB_W], rowmap[SCR_H], rowmap1[SCR_H];
+static unsigned char colw[FB_W], roww[SCR_H];
+static int maps_w = -1;
+static void safe_axis(int n_out, int lo, int n_safe, int n_src, short *m0, short *m1, unsigned char *w) {
+    for (int i = 0; i < n_out; i++) {
+        int c, f;
+        if (i < lo) { c = 0; f = 0; }
+        else if (i >= lo + n_safe) { c = n_src - 1; f = 0; }
+        else {
+            int num = (int)(((long long)(2 * (i - lo) + 1) * n_src * 256) / (2 * n_safe)) - 128;
+            if (num < 0) num = 0;
+            c = num >> 8; f = num & 255;
+            if (c >= n_src - 1) { c = n_src - 1; f = 0; }
+        }
+        m0[i] = (short)c; m1[i] = (short)(c + 1 < n_src ? c + 1 : c); w[i] = (unsigned char)f;
+    }
+}
+static void safe_maps(void) {
+    if (maps_w == SCR_W) return;
+    maps_w = SCR_W;
+    safe_axis(FB_W, SAFE_X, SAFE_W, SCR_W, colmap, colmap1, colw);
+    safe_axis(SCR_H, SAFE_Y, SAFE_H, SCR_H, rowmap, rowmap1, roww);
+}
+static inline u32 mix2(u32 a, u32 b, unsigned w) {
+    if (!w || a == b) return a;
+    unsigned iw = 256 - w;
+    u32 rb = ((a & 0xff00ff) * iw + (b & 0xff00ff) * w) >> 8;
+    u32 g = ((a & 0xff00) * iw + (b & 0xff00) * w) >> 8;
+    return (rb & 0xff00ff) | (g & 0xff00);
+}
+static inline u32 rgb2yuyv(u32 a, u32 b);
+/* una fila del XFB (fy, 0..479) en YUYV, desde el lienzo escalado a la zona segura */
+/* color dominante de una fila del lienzo (para las franjas de arriba/abajo: sin rayas) */
+static u32 edge_mode(int row) {
+    u32 v[64]; int best = 0; u32 bc = 0;
+    const u32 *s = canvas + row * SCR_W;
+    for (int i = 0; i < 64; i++) v[i] = s[i * SCR_W / 64];
+    for (int i = 0; i < 64; i++) { int c = 0; for (int j = i; j < 64; j++) c += v[j] == v[i]; if (c > best) { best = c; bc = v[i]; } if (best > 32) break; }
+    return bc;
+}
+static void scan_row(int fy, u32 *d) {
+    static u32 rowtmp[SCR_MAX_W];
+    static u32 band_top, band_bot;
+    if (fy < SAFE_Y || fy >= SAFE_Y + SAFE_H) {
+        u32 c;
+        if (fy < SAFE_Y) { if (fy == 0) band_top = edge_mode(0); c = band_top; }
+        else { if (fy == SAFE_Y + SAFE_H) band_bot = edge_mode(SCR_H - 1); c = band_bot; }
+        u32 v = rgb2yuyv(c, c);
+        for (int x = 0; x < FB_W / 2; x++) d[x] = v;
+        return;
+    }
+    const u32 *s = canvas + rowmap[fy] * SCR_W;
+    unsigned wy = roww[fy];
+    if (wy) {
+        const u32 *s2 = canvas + rowmap1[fy] * SCR_W;
+        for (int i = 0; i < SCR_W; i++) rowtmp[i] = mix2(s[i], s2[i], wy);
+        s = rowtmp;
+    }
+    u32 la = 0xFFFFFFFF, lb = 0xFFFFFFFF, lv = 0;
+    for (int x = 0; x < FB_W; x += 2) {
+        u32 a = mix2(s[colmap[x]], s[colmap1[x]], colw[x]);
+        u32 b = mix2(s[colmap[x + 1]], s[colmap1[x + 1]], colw[x + 1]);
+        if (a != la || b != lb) { lv = rgb2yuyv(a, b); la = a; lb = b; }
+        *d++ = lv;
+    }
+}
+/* filas del XFB afectadas por las filas [y0,y1) del lienzo */
+static void safe_rows(int y0, int y1, int *f0, int *f1) {
+    *f0 = y0 <= 0 ? 0 : SAFE_Y + y0 * SAFE_H / SCR_H - 1;
+    *f1 = y1 >= SCR_H ? SCR_H : SAFE_Y + (y1 * SAFE_H + SCR_H - 1) / SCR_H + 1;
+    if (*f0 < 0) *f0 = 0;
+    if (*f1 > SCR_H) *f1 = SCR_H;
+}
+/* puntero IR (coordenadas del XFB 640x480) -> lienzo */
+int gfx_pointer_x(int x) { return (x - SAFE_X) * SCR_W / SAFE_W; }
+int gfx_pointer_y(int y) { return (y - SAFE_Y) * SCR_H / SAFE_H; }
 static int ui_cache_valid;
 
 static void *xfb[2];
@@ -94,16 +180,12 @@ void gfx_present(void) {
     int yoff = (h - SCR_H) / 2, xoff = (rmode->fbWidth - FB_W) / 4;
     if (yoff < 0) yoff = 0;
     if (xoff < 0) xoff = 0;
+    safe_maps();
     for (y = 0; y < SCR_H && y + yoff < h; y++) {
         u32 *d = dst + (y + yoff) * stride + xoff;
-        const u32 *s = canvas + y * SCR_W;
-        u32 la = 0xFFFFFFFF, lb = 0xFFFFFFFF, lv = 0;
-        for (x = 0; x < FB_W; x += 2) {
-            u32 a=s[x*SCR_W/FB_W],b=s[(x+1)*SCR_W/FB_W];
-            if (a != la || b != lb) { lv = rgb2yuyv(a, b); la = a; lb = b; }  /* zonas planas: rapido */
-            *d++ = lv;
-        }
+        scan_row(y, d);
     }
+    (void)x;
     DCFlushRange(xfb[cur], VIDEO_GetFrameBufferSize(rmode));
     VIDEO_SetNextFramebuffer(xfb[cur]);
     VIDEO_Flush();
@@ -455,16 +537,13 @@ void gfx_ui_cache_rows(int y0, int y1) {
     if (y1 > SCR_H) y1 = SCR_H;
     if (!uicache) return;
     ui_gen++;ui_cache_valid=1;
+    safe_maps();
+    { int f0, f1; safe_rows(y0, y1, &f0, &f1); y0 = f0; y1 = f1; }
     for (y = y0; y < y1; y++) {
         u32 *d = uicache + y * (FB_W / 2);
-        const u32 *s = canvas + y * SCR_W;
-        u32 la = 0xFFFFFFFF, lb = 0xFFFFFFFF, lv = 0;
-        for (x = 0; x < FB_W; x += 2) {
-            u32 a=s[x*SCR_W/FB_W],b=s[(x+1)*SCR_W/FB_W];
-            if (a != la || b != lb) { lv = rgb2yuyv(a, b); la = a; lb = b; }
-            *d++ = lv;
-        }
+        scan_row(y, d);
     }
+    (void)x;
 }
 
 /* rowsrc[y]: 0 = negro (o video), 1 = fila de la UI cacheada (video encima), 2 = UI opaca (sin video) */
@@ -475,8 +554,10 @@ void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsi
     int full=vw==SCR_W, wide=gfx_widescreen();
     /* UI coordinates are genuine 854x480 / 640x480 square-pixel coordinates.
        Only the final scanout is compressed into the fixed 640-pixel XFB. */
-    int bx=full?0:vx*FB_W/SCR_W;
-    int by=full?0:vy,bw=full?FB_W:vw*FB_W/SCR_W,bh=full?SCR_H:vh;
+    safe_maps();
+    /* rc12: el rectangulo del video pasa por la misma zona segura que la UI (salvo pantalla completa). */
+    int bx=full?0:SAFE_X+vx*SAFE_W/SCR_W;
+    int by=full?0:SAFE_Y+vy*SAFE_H/SCR_H,bw=full?FB_W:vw*SAFE_W/SCR_W,bh=full?SCR_H:vh*SAFE_H/SCR_H;
     int rw=bw,rh=bh;
     if(p&&p->w>0&&p->h>0&&bw>0&&bh>0) {
         float dar=p->aspect>0?p->aspect:(float)p->w/p->h;
@@ -499,7 +580,7 @@ void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsi
     if(y1>SCR_H)y1=SCR_H;
     for(int y=y0;y<y1&&y+yoff<h;y++) {
         u32 *d=dst+(y+yoff)*stride+xoff;
-        int src=rowsrc?rowsrc[y]:1;
+        int src=rowsrc?rowsrc[rowmap[y]]:1;
         if(!partial) {
             if(src)memcpy(d,uicache+y*(FB_W/2),FB_W*2);
             else for(int x=0;x<FB_W/2;x++)d[x]=0x10801080;

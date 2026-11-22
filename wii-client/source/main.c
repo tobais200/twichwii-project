@@ -506,7 +506,7 @@ static int topbar(void) {
     /* Right: Iniciar sesion (always on-screen, pointer + A) then menu. */
     {
         int menu_w = 38, menu_x = SCR_W - 10 - menu_w;
-        const char *login_lab = auth_ready() ? auth_login() : (auth_has_session() ? "Cuenta" : "Iniciar sesi\xc3\xb3n");
+        const char *login_lab = auth_ready() ? auth_login() : (auth_has_session() ? (auth_login()[0] ? auth_login() : "Cuenta") : "Iniciar sesi\xc3\xb3n");
         int login_style = auth_ready() ? BS_NORMAL : BS_ACCENT;
         int isz = 30 * 9 / 20;
         int login_w = gfx_text_w(&font_bold, login_lab) + isz + 8 + 16;
@@ -1557,7 +1557,7 @@ int main(int argc, char **argv) {
     }
     while (SYS_MainLoop() && !quit) {
         grid_y_extra = (screen == SCR_HOME && !cur_game[0] && nhome_cats) ? SHELF_H : 0;
-        if(chat_auth_rejected()){chat_stop();auth_logout();watch_chat_started=0;}
+        if(chat_auth_rejected()){chat_stop();auth_refresh_now();watch_chat_started=0;} /* rc12: renovar en vez de borrar la sesion guardada */
         if(auth_due()){chat_stop();thumbs_pause(1);auth_ensure();if(screen==SCR_WATCH&&watch_chat_started)chat_start(pinfo.slug);if(screen!=SCR_WATCH)thumbs_pause(0);}
 
         u32 d = in_poll();
