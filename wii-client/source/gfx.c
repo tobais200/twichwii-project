@@ -1,3 +1,4 @@
+#include <stdio.h>
 /*
  * gfx.c - lienzo virtual por software 640/854x480 (RGB) convertido a YUYV en el XFB.
  * Todo el arte (iconos, logo, cursor) se dibuja con primitivas propias.
@@ -24,8 +25,12 @@ int gfx_aspect_mode(void) { return aspect_mode; }
  * margenes repiten el borde del lienzo, asi los fondos siguen llegando al borde
  * y ningun texto/boton queda fuera de la pantalla. El video a pantalla completa
  * sigue ocupando toda la pantalla (sobre el video el TV recorta igual). */
-#define SAFE_X 32
+/* rc15/rc10: el margen de los costados baja de 32 a 12 px en 4:3 y 16:9 (la UI llena el ancho del TV,
+ * con un margen chico para el overscan). Los margenes ahora son negros:
+ * antes repetian el borde del lienzo y en TVs que muestran todo se veian franjas de color. */
+#define SAFE_X 12
 #define SAFE_Y 24
+#define BLACK_YUYV 0x10801080u
 #define SAFE_W (FB_W - 2 * SAFE_X)
 #define SAFE_H (SCR_H - 2 * SAFE_Y)
 /* Mapas con filtro bilineal (pesos 0..255) para que el texto escalado no pierda trazos. */
@@ -62,7 +67,7 @@ static inline u32 mix2(u32 a, u32 b, unsigned w) {
 static inline u32 rgb2yuyv(u32 a, u32 b);
 /* una fila del XFB (fy, 0..479) en YUYV, desde el lienzo escalado a la zona segura */
 /* color dominante de una fila del lienzo (para las franjas de arriba/abajo: sin rayas) */
-static u32 edge_mode(int row) {
+static u32 __attribute__((unused)) edge_mode(int row) {
     u32 v[64]; int best = 0; u32 bc = 0;
     const u32 *s = canvas + row * SCR_W;
     for (int i = 0; i < 64; i++) v[i] = s[i * SCR_W / 64];
@@ -71,13 +76,8 @@ static u32 edge_mode(int row) {
 }
 static void scan_row(int fy, u32 *d) {
     static u32 rowtmp[SCR_MAX_W];
-    static u32 band_top, band_bot;
-    if (fy < SAFE_Y || fy >= SAFE_Y + SAFE_H) {
-        u32 c;
-        if (fy < SAFE_Y) { if (fy == 0) band_top = edge_mode(0); c = band_top; }
-        else { if (fy == SAFE_Y + SAFE_H) band_bot = edge_mode(SCR_H - 1); c = band_bot; }
-        u32 v = rgb2yuyv(c, c);
-        for (int x = 0; x < FB_W / 2; x++) d[x] = v;
+    if (fy < SAFE_Y || fy >= SAFE_Y + SAFE_H) {   /* franjas de arriba/abajo: negro fijo */
+        for (int x = 0; x < FB_W / 2; x++) d[x] = BLACK_YUYV;
         return;
     }
     const u32 *s = canvas + rowmap[fy] * SCR_W;
@@ -94,6 +94,9 @@ static void scan_row(int fy, u32 *d) {
         if (a != la || b != lb) { lv = rgb2yuyv(a, b); la = a; lb = b; }
         *d++ = lv;
     }
+    d -= FB_W / 2;   /* costados: negro fijo */
+    for (int x = 0; x < SAFE_X / 2; x++) d[x] = BLACK_YUYV;
+    for (int x = (SAFE_X + SAFE_W) / 2; x < FB_W / 2; x++) d[x] = BLACK_YUYV;
 }
 /* filas del XFB afectadas por las filas [y0,y1) del lienzo */
 static void safe_rows(int y0, int y1, int *f0, int *f1) {
@@ -568,6 +571,8 @@ static void scan_row_part(int fy, u32 *d, int c0, int c1) {
     if (fy < SAFE_Y || fy >= SAFE_Y + SAFE_H) return;
     const u32 *s = canvas + rowmap[fy] * SCR_W, *s2 = canvas + rowmap1[fy] * SCR_W;
     unsigned wy = roww[fy];
+    if (c0 < SAFE_X) c0 = SAFE_X;
+    if (c1 > SAFE_X + SAFE_W) c1 = SAFE_X + SAFE_W;
     for (int x = c0; x < c1; x += 2) {
         u32 a0 = s[colmap[x]], a1 = s[colmap1[x]], b0 = s[colmap[x + 1]], b1 = s[colmap1[x + 1]];
         if (wy) { a0 = mix2(a0, s2[colmap[x]], wy); a1 = mix2(a1, s2[colmap1[x]], wy); b0 = mix2(b0, s2[colmap[x + 1]], wy); b1 = mix2(b1, s2[colmap1[x + 1]], wy); }

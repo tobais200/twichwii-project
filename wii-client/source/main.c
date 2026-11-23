@@ -765,7 +765,7 @@ static void draw_home(void) {
     }
     if (maxs > 0) {
         int th = VIEW_H * VIEW_H / (content + 1), ty = VIEW_Y + (VIEW_H - th) * scroll / maxs;
-        gfx_rrect(SCR_W - 6, ty, 4, th, 2, 0x4A4A52, 255);
+        (void)th; (void)ty;   /* rc10: sin barra de desplazamiento al costado de la grilla */
         if (ui_hover(MX, SCR_H - 22, MW, 22) && scroll_t < maxs) scroll_t += 6;
         if (ui_hover(MX, VIEW_Y - 4, MW, 14) && scroll_t > 0) scroll_t -= 6;
     }
@@ -859,7 +859,7 @@ static void draw_browse(void) {
     if (!bcats.n) gfx_text_c(&font_bold, MX + MW / 2, BGRID_Y + 100, bloaded ? (berr[0] ? berr : "Sin categor\xc3\xad" "as") : "Cargando...", C_DIM);
     if (maxs > 0) {
         int th = BGRID_H * BGRID_H / (content + 1), ty2 = BGRID_Y + (BGRID_H - th) * bscroll / maxs;
-        gfx_rrect(SCR_W - 6, ty2, 4, th, 2, 0x4A4A52, 255);
+        (void)th; (void)ty2;   /* rc10: sin barra de desplazamiento */
         if (ui_hover(MX, SCR_H - 22, MW, 22) && bscroll_t < maxs) bscroll_t += 6;
         if (ui_hover(MX, BGRID_Y - 4, MW, 14) && bscroll_t > 0) bscroll_t -= 6;
     }
