@@ -65,7 +65,7 @@ static int irc_line(irc_conn *c, char *line) {
         if (prefix) { while (*prefix == ' ' || *prefix == ':') prefix++; int i = 0; while (prefix[i] && prefix[i] != '!' && i < 27) { name[i] = prefix[i]; i++; } name[i] = 0; }
     }
     if (!strncmp(body, "\001ACTION ", 8)) { body += 8; char *end = strchr(body, '\001'); if (end) *end = 0; }
-    push(name, body, parse_color(color), 0);
+    { static char emotes[600]; irc_tag(line, "emotes", emotes, sizeof(emotes)); push_e(name, body, parse_color(color), 0, emotes); }
     return 1;
 }
 static int irc_connect(void) {

@@ -37,18 +37,60 @@ static u32 parse_color(const char *c) {
     return v;
 }
 
-static void push(const char *name, const char *text, u32 color, int sys) {
+/* rc7: tag IRC "emotes=25:0-4,12-16/1902:6-10" (indices en caracteres) -> rangos en bytes de text. */
+static void parse_emotes(tchat_t *m, const char *tag) {
+    m->ne = 0;
+    if (!tag || !tag[0] || m->sys) return;
+    int tl = strlen(m->text);
+    /* indice de caracter -> byte */
+    static short cpos[201]; int nc = 0, b = 0;
+    while (b < tl && nc < 200) { cpos[nc++] = b; unsigned char c = m->text[b]; b += c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4; }
+    cpos[nc] = tl;
+    const char *p = tag;
+    while (*p && m->ne < 8) {
+        char id[48]; int k = 0;
+        while (*p && *p != ':' && k < 47) id[k++] = *p++;
+        id[k] = 0;
+        if (*p != ':') break;
+        p++;
+        while (*p && *p != '/') {
+            int s0 = (int)strtol(p, (char **)&p, 10), e0 = -1;
+            if (*p == '-') { p++; e0 = (int)strtol(p, (char **)&p, 10); }
+            if (e0 >= s0 && s0 >= 0 && e0 < nc && m->ne < 8) {
+                int bs = cpos[s0], be = cpos[e0 + 1], ok = be > bs && be - bs < 64;
+                for (int q = bs; ok && q < be; q++) if (m->text[q] == ' ') ok = 0;
+                for (const char *q = id; ok && *q; q++) if (!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') || *q == '_')) ok = 0;
+                if (ok) {   /* ordenados por posicion */
+                    int at = m->ne;
+                    while (at > 0 && m->eat[at - 1] > bs) { m->eat[at] = m->eat[at - 1]; m->elen[at] = m->elen[at - 1]; memcpy(m->eid[at], m->eid[at - 1], 48); at--; }
+                    m->eat[at] = bs; m->elen[at] = be - bs; snprintf(m->eid[at], 48, "%s", id); m->ne++;
+                }
+            }
+            if (*p == ',') p++;
+            else if (*p != '/') { while (*p && *p != '/') p++; }
+        }
+        if (*p == '/') p++;
+    }
+}
+int emote_url(const char *id, char *out, int cap) {
+    if (!id || !id[0] || strlen(id) > 47) return 0;
+    snprintf(out, cap, "https://static-cdn.jtvnw.net/emoticons/v2/%s/static/dark/1.0", id);   /* static = primer cuadro, 28 px */
+    return 1;
+}
+static void push_e(const char *name, const char *text, u32 color, int sys, const char *emotes) {
     LWP_MutexLock(mtx);
     tchat_t *m = &ring[(head + count) % NMSG];
     if (count == NMSG) { head = (head + 1) % NMSG; m = &ring[(head + count - 1) % NMSG]; }
     else count++;
     snprintf(m->name, sizeof(m->name), "%s", name);
     snprintf(m->text, sizeof(m->text), "%s", text);
+    m->sys = sys; parse_emotes(m, emotes);
     m->color = color ? color : 0x9146FF;
     m->sys = sys;
     gen++;
     LWP_MutexUnlock(mtx);
 }
+static void push(const char *name, const char *text, u32 color, int sys) { push_e(name, text, color, sys, NULL); }
 
 #include "irc_direct.inc"
 
@@ -123,3 +165,10 @@ int chat_send_text(const char *text) {
 void chat_local_echo(const char *name,const char *text){if(mtx_ok)push(name,text,C_ACCENT,0);}
 
 int chat_auth_rejected(void){if(!mtx_ok)return 0;LWP_MutexLock(mtx);int r=rejected;LWP_MutexUnlock(mtx);return r;}
+
+#ifdef AUTOTEST_EMOTES
+void chat_test_inject(void){if(!mtx_ok)return;
+ /* "Kappa hola LUL animado PogChamp y un texto largo para probar el corte de linea Kappa" */
+ push_e("PruebaEmotes","Kappa hola LUL animado catJAM y un texto largo para probar el corte de linea Kappa",0x53FC18,0,"25:0-4,77-81/425618:11-13/emotesv2_dcd06b30a5c24f6eb871e8f5edbd44f7:23-28");
+ push_e("Otro","\xc3\xa1\xc3\xa9 Kappa Kappa",0xFF7A00,0,"25:3-7,9-13");}
+#endif

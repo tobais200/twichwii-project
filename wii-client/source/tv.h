@@ -17,7 +17,7 @@
 
 #include "clock_sync.h"
 
-#define TV_VERSION "1.2-rc6"
+#define TV_VERSION "1.2-rc7"
 #define TV_UA          "Mozilla/5.0 (Nintendo Wii; U; ; 3642; es) AppleWebKit/535.19 (KHTML, like Gecko) TwitchWii/" TV_VERSION
 #define TV_CFG_DIR     "sd:/apps/TwitchWii/"
 #define TV_APP_NAME    "TwitchWii"
@@ -190,7 +190,11 @@ int  tw_vod_url(const tvod_t *v, char *url, int usz, char *err, int esz);
 int  tw_parse_token(const char *json, kstream_t *info, char *url, int usz);
 
 /* ---- chat.c: chat de solo lectura (via companion), hilo propio ---- */
-typedef struct { char name[28]; char text[200]; u32 color; int sys; } tchat_t;
+/* rc7: ne emotes de Twitch en text[eat[i]..+elen[i]], id en eid (tag IRC "emotes"). */
+typedef struct { char name[28]; char text[200]; u32 color; int sys; unsigned char ne, eat[8], elen[8]; char eid[8][48]; } tchat_t;
+int emote_url(const char *id, char *out, int cap);
+void chat_test_inject(void);            /* chat.c */
+int chat_rich(const void *font, int x, int y, int maxw, const tchat_t *m, u32 namecol, u32 textcol, int draw);
 void chat_start(const char *login);
 void chat_stop(void);
 int chat_auth_rejected(void);
@@ -202,6 +206,7 @@ const char *chat_status(void);
 typedef struct { int w, h; u32 *px; } kimg_t;
 void thumbs_init(void);
 void thumbs_pause(int p);                 /* 1 = no bajar nada (video a pantalla completa) */
+const kimg_t *emote_get(const char *url);  /* rc7: cola de emotes del chat */
 const kimg_t *thumb_get(const char *path); /* NULL si todavia no esta; la pide */
 void thumbs_flush(void);                  /* cambia el servidor: vaciar */
 int  thumbs_pending(void);

@@ -40,7 +40,7 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,--wrap=mkdir,--wrap=_rename_r -Wl,-Map,$(notdir $@).
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:=	-lavformat -lavcodec -lswresample -lavutil -lcurl -ljpeg -lpng -lwebp -lsharpyuv -lz -lmbedtls -lmbedx509 -lmbedcrypto -leverest -lp256m -lwiisocket -lwiikeyboard -lfat -lasnd -lwiiuse -lbte -logc -lm
+LIBS	:=	-lavformat -lavcodec -lswresample -lavutil -lcurl -ljpeg -lpng -lwebpdemux -lwebp -lsharpyuv -lz -lmbedtls -lmbedx509 -lmbedcrypto -leverest -lp256m -lwiisocket -lwiikeyboard -lfat -lasnd -lwiiuse -lbte -logc -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
