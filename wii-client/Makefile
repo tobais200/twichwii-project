@@ -34,7 +34,7 @@ CXXFLAGS	=	$(CFLAGS)
 
 # Path stays correct when this Makefile is re-invoked from build/.
 # Custom script places ff_tx_tab_* in a MEM2 NOLOAD section.
-LDFLAGS	=	-g $(MACHDEP) -Wl,--wrap=mkdir,--wrap=_rename_r -Wl,-Map,$(notdir $@).map -T$(TWITCHWII_MKDIR)ld/twitchwii.ld
+LDFLAGS	=	-g $(MACHDEP) -Wl,--wrap=mkdir,--wrap=_rename_r -Wl,-Map,$(notdir $@).map -T$(TWITCHWII_MKDIR)ld/twitchwii.ld $(EXTRA_LDFLAGS)
 
 
 #---------------------------------------------------------------------------------

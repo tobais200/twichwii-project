@@ -178,15 +178,24 @@ static void wait_release(void) {
 /* ---------------- teclado en pantalla ---------------- */
 #define KB_ROWS 4
 static const char *kb_rows[KB_ROWS] = { "1234567890", "qwertyuiop", "asdfghjkl\xf1", "zxcvbnm-_." };
-enum { K_SPACE, K_BACK, K_CLEAR, K_SHIFT, K_CANCEL, K_OK, K_NSPECIAL };
+enum { K_SPACE, K_BACK, K_CLEAR, K_SHIFT, K_CANCEL, K_OK, K_EMOTE, K_NSPECIAL };
 
 static void kb_char(char *buf, int max, int *len, int ch) {
     /* inserta Latin-1 como UTF-8 */
     if (ch < 0x80) { if (*len < max) { buf[(*len)++] = ch; buf[*len] = 0; } }
     else if (*len + 1 < max) { buf[(*len)++] = 0xC0 | (ch >> 6); buf[(*len)++] = 0x80 | (ch & 0x3F); buf[*len] = 0; }
 }
+/* rc14: selector de emotes en el teclado. La app los fija antes de abrir el teclado
+ * (redaccion del chat) y los limpia despues; en las demas pantallas quedan en NULL. */
+int (*sui_kb_emote_hook)(char *out, int cap) = NULL;              /* abre la grilla; 1 = out tiene el texto a insertar */
+int (*sui_kb_preview)(const char *buf, int x, int y, int w) = NULL; /* dibuja el campo con imagenes; devuelve x del cursor o -1 */
 static void kb_back(char *buf, int *len) {
     if (!*len) return;
+    if (buf[*len - 1] == ']') {   /* [emote:ID:nombre] de Kick: se borra entero */
+        char *t = NULL;
+        for (int i = *len - 1; i >= 0; i--) if (!strncmp(buf + i, "[emote:", 7)) { t = buf + i; break; }
+        if (t && !strchr(t, ' ') && strchr(t + 7, ':')) { *len = t - buf; buf[*len] = 0; return; }
+    }
     (*len)--;
     while (*len > 0 && ((unsigned char)buf[*len] & 0xC0) == 0x80) (*len)--;
     buf[*len] = 0;
@@ -194,7 +203,7 @@ static void kb_back(char *buf, int *len) {
 
 int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,const char *accept,const char *placeholder) {
     int r = 1, c = 0, shift = 0, len = strlen(buf), done = -1, i, k;
-    int px = (SCR_W-592)/2, py = 48, pw = 592, ph = 384;
+    int px = (SCR_W-592)/2, py = 40, pw = 592, ph = 404;   /* rc14: 20 px mas: la ayuda ya no pisa la ultima fila */
     wait_release();
     while (SYS_MainLoop() && done < 0) {
         u32 d = in_poll();
@@ -209,7 +218,8 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
         if (d & WPAD_BUTTON_HOME) done = 0;
         if (d & WPAD_BUTTON_UP)    r = (r + KB_ROWS) % (KB_ROWS + 1);
         if (d & WPAD_BUTTON_DOWN)  r = (r + 1) % (KB_ROWS + 1);
-        int cols = (r == KB_ROWS) ? K_NSPECIAL : 10;
+        int has_emo = sui_kb_emote_hook != NULL, nsp = has_emo ? K_NSPECIAL : K_EMOTE;
+        int cols = (r == KB_ROWS) ? nsp : 10;
         if (c >= cols) c = cols - 1;
         if (d & WPAD_BUTTON_LEFT)  c = (c + cols - 1) % cols;
         if (d & WPAD_BUTTON_RIGHT) c = (c + 1) % cols;
@@ -227,11 +237,14 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
         gfx_rframe(fx, fy, fw, fh, 10, 2, C_ACCENT, 255);
         gfx_icon(IC_SEARCH, fx + 22, fy + fh / 2, 18, C_DIM);
         {
-            const char *show = buf;
-            while (gfx_text_w(&font_title, show) > fw - 70 && *show) { const char *q = show; utf8_next(&q); show = q; }
-            int tw = gfx_text(&font_title, fx + 42, fy + 9, show, C_TEXT);
+            int cx = buf[0] && sui_kb_preview ? sui_kb_preview(buf, fx + 42, fy + 12, fw - 70) : -1;
+            if (cx < 0) {
+                const char *show = buf;
+                while (gfx_text_w(&font_title, show) > fw - 70 && *show) { const char *q = show; utf8_next(&q); show = q; }
+                cx = fx + 44 + gfx_text(&font_title, fx + 42, fy + 9, show, C_TEXT);
+            }
             if (!buf[0]) gfx_text(&font_body, fx + 44, fy + 14, placeholder, C_FAINT);
-            if ((anim / 20) & 1) gfx_rect(fx + 44 + tw, fy + 10, 2, 25, C_ACCENT);
+            if ((anim / 20) & 1) gfx_rect(cx, fy + 10, 2, 25, C_ACCENT);
         }
         /* teclas */
         int kw = 50, kh = 42, gap = 6, kx0 = px + (pw - (10 * kw + 9 * gap)) / 2, ky0 = py + 136;
@@ -245,17 +258,20 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             if (ui_hover(x, y, kw, kh)) { r = i; c = k; }
             if (ui_button(x, y, kw, kh, lab, 0, BS_NORMAL, foc || (r == i && c == k && in_ptr.valid))) fire = 1000 + ch;
         }
-        static const char *sl[K_NSPECIAL] = { "Espacio", "Borrar", "Limpiar", "Mayus", "Cancelar", "Buscar" };
-        static const int sw[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84 };
+        static const char *sl[K_NSPECIAL] = { "Espacio", "Borrar", "Limpiar", "Mayus", "Cancelar", "Buscar", "Emotes" };
+        static const int sw0[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84, 0 };
+        static const int sw1[K_NSPECIAL] = { 68, 80, 72, 64, 80, 80, 74 };   /* con la tecla Emotes: mismo ancho total */
+        const int *sw = has_emo ? sw1 : sw0;
         int sx = kx0, sy = ky0 + KB_ROWS * (kh + gap) + 4;
-        for (k = 0; k < K_NSPECIAL; k++) {
+        for (k = 0; k < nsp; k++) {
             int st = k == K_OK ? BS_ACCENT : (k == K_SHIFT && shift ? BS_ACCENT : BS_NORMAL);
+            if (k == K_EMOTE) { sx = kx0 + 10 * kw + 9 * gap - sw[k]; }
             int ic = k == K_OK ? IC_SEARCH : (k == K_BACK ? IC_BACK : 0);
             if (ui_hover(sx, sy, sw[k], kh)) { r = KB_ROWS; c = k; }
             if (ui_button(sx, sy, sw[k], kh, k==K_OK?accept:sl[k], ic, st, r == KB_ROWS && c == k)) fire = k;
             sx += sw[k] + gap;
         }
-        gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, "A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)", C_FAINT);
+        gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, has_emo ? "A: tecla   B: borrar   +: aceptar   -: cancelar   2: emotes" : "A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)", C_FAINT);
         ui_present();
 
         if (fire < 0 && (d & WPAD_BUTTON_A) && !UI.consumed)
@@ -273,6 +289,21 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             case K_SHIFT:  shift = !shift; break;
             case K_CANCEL: done = 0; break;
             case K_OK:     done = 1; break;
+            case K_EMOTE:  fire = -3; break;
+        }
+        if (has_emo && (d & WPAD_BUTTON_2)) fire = -3;
+        if (fire == -3) {   /* rc14: grilla de emotes; inserta separado por espacios */
+            char ins[96] = "";
+            if (sui_kb_emote_hook(ins, sizeof ins) && ins[0]) {
+                int need = strlen(ins) + 2;
+                if (len + need <= max) {
+                    if (len && buf[len - 1] != ' ') buf[len++] = ' ';
+                    memcpy(buf + len, ins, strlen(ins)); len += strlen(ins);
+                    if (buf[len - 1] != ' ') buf[len++] = ' ';
+                    buf[len] = 0;
+                } else ui_toast("No entra: el mensaje ya esta lleno.");
+            }
+            wait_release();
         }
     }
     return done == 1;

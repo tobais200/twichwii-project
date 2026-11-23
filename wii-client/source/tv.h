@@ -17,7 +17,7 @@
 
 #include "clock_sync.h"
 
-#define TV_VERSION "1.2-rc7"
+#define TV_VERSION "1.2-rc9"
 #define TV_UA          "Mozilla/5.0 (Nintendo Wii; U; ; 3642; es) AppleWebKit/535.19 (KHTML, like Gecko) TwitchWii/" TV_VERSION
 #define TV_CFG_DIR     "sd:/apps/TwitchWii/"
 #define TV_APP_NAME    "TwitchWii"
@@ -109,6 +109,7 @@ char *sh_html_to_text(const char *html);
 void  sh_curl_common(void *curl, char *errbuf);
 int   sh_request(const char *method, const char *url, const char *const *headers, const char *body, const char *ua, sh_resp_t *r);
 void  sh_resp_free(sh_resp_t *r);
+long  auth_helix_get(const char *pathq, sh_resp_t *r);   /* rc8: auth.c */
 const char *jws(const char *p);
 const char *jskip(const char *p);
 const char *jget(const char *obj, const char *key);
@@ -204,6 +205,24 @@ const char *chat_status(void);
 
 /* ---- thumbs.c: miniaturas/avatares RGB del companion, en un hilo aparte ---- */
 typedef struct { int w, h; u32 *px; } kimg_t;
+/* rc8: emote animado reducido al alto del chat. px = n cuadros w*h RGB565, ANIM_KEY = transparente. */
+#define ANIM_KEY 0xF81F
+typedef struct { int n, w, h, total; u16 *px; u16 *dly; u32 bytes; } kanim_t;
+const kimg_t *emote_get_anim(const char *url, const kanim_t **anim); /* rc8: tambien devuelve la animacion si hay */
+void thumbs_mem(char *out, int cap);       /* rc8: estado de memoria de imagenes (para logs) */
+void thumbs_anim_gc(void);
+void chat_anim_begin(void);                /* rc8: antes de redibujar todo el panel de chat */
+void chat_anim_reset(void);
+int  chat_anim_tick(void);                 /* avanza los emotes animados visibles; filas reescritas */
+int  chat_anim_count(void);
+void chat_anim_stats(unsigned *rows, unsigned *ticks);
+void chat_test_soak(int k);
+/* rc8: selector de emotes del teclado del chat (emote_ui.c) */
+typedef struct { char name[40]; char id[48]; unsigned char group, locked; char note[24]; } emo_item_t;
+int emote_grid(const char *title, const emo_item_t *it, int n, const char *const *gname, int ng, int *sel);
+int emote_preview_draw(const tchat_t *m, int x, int y, int w);
+extern int (*sui_kb_emote_hook)(char *out, int cap);
+extern int (*sui_kb_preview)(const char *buf, int x, int y, int w);
 void thumbs_init(void);
 void thumbs_pause(int p);                 /* 1 = no bajar nada (video a pantalla completa) */
 const kimg_t *emote_get(const char *url);  /* rc7: cola de emotes del chat */

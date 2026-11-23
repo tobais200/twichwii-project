@@ -48,17 +48,79 @@ void auth_screen(void){thumbs_pause(1);ui_set_backdrop(NULL);
  int back=ui_button(436+OX,416,162,30,"Volver",IC_BACK,BS_NORMAL,0);ui_present();if(back)break;
  }
 }
+/* ---- rc8: selector de emotes del teclado del chat ----
+ * Con sesion: Helix chat/emotes/global + chat/emotes?broadcaster_id (sin permisos nuevos;
+ * los "solo suscriptores" del canal se marcan con candado porque sin user:read:emotes no se
+ * sabe si estas suscrito). Sin Helix: GQL publico de la web. Mas los vistos en el chat.
+ * Se inserta el nombre como texto, separado por espacios. */
+#define TW_NEM 400
+static const char *kb_chan_tw="";
+static emo_item_t tw_em[TW_NEM];static int tw_n;static char tw_chan[64];
+static int tw_has(const char*id){for(int i=0;i<tw_n;i++)if(!strcmp(tw_em[i].id,id))return 1;return 0;}
+static void tw_add(const char*id,const char*name,int group,int locked,const char*note){
+ if(tw_n>=TW_NEM||!id[0]||!name[0]||strlen(name)>=sizeof(tw_em[0].name)||strlen(id)>=sizeof(tw_em[0].id)||tw_has(id))return;
+ for(const char*p=name;*p;p++)if((unsigned char)*p<33)return;
+ emo_item_t*e=&tw_em[tw_n++];memset(e,0,sizeof(*e));snprintf(e->id,sizeof(e->id),"%s",id);snprintf(e->name,sizeof(e->name),"%s",name);e->group=group;e->locked=locked;snprintf(e->note,sizeof(e->note),"%s",note?note:"");}
+static void tw_seen(void){static tchat_t m[24];int n=chat_get(m,24);for(int i=n-1;i>=0;i--)for(int k=0;k<m[i].ne;k++){char nm[40];int L=m[i].elen[k];if(L<=0||L>=40||m[i].eat[k]+L>(int)strlen(m[i].text))continue;memcpy(nm,m[i].text+m[i].eat[k],L);nm[L]=0;tw_add(m[i].eid[k],nm,2,0,"visto en el chat");}}
+static int tw_helix_list(const char*json,int group,int chan){int n=0;const char*arr=json?jget(json,"data"):NULL;
+ for(const char*e=arr?jarr_first(arr):NULL;e;e=jarr_next(e)){char id[48]="",nm[40]="",ty[24]="";const char*v;
+  if((v=jget(e,"id")))jstr(v,id,sizeof(id));if((v=jget(e,"name")))jstr(v,nm,sizeof(nm));if((v=jget(e,"emote_type"))&&!jis_null(v))jstr(v,ty,sizeof(ty));
+  int sub=chan&&!strcmp(ty,"subscriptions");tw_add(id,nm,group,sub,chan&&!strcmp(ty,"follower")?"seguidores":chan&&!strcmp(ty,"bitstier")?"bits":"");n++;}
+ return n;}
+static void tw_load(const char*channel){
+ tw_n=0;snprintf(tw_chan,sizeof(tw_chan),"%s",channel?channel:"");
+ sui_busy("Emotes","Cargando emotes del canal...");
+ sh_resp_t r;char q[200];int got=0;
+ snprintf(q,sizeof(q),"users?login=%s",tw_chan);
+ if(auth_helix_get(q,&r)==200&&r.data){char bid[32]="";const char*a=jget(r.data,"data"),*u=a?jarr_first(a):NULL,*v=u?jget(u,"id"):NULL;if(v)jstr(v,bid,sizeof(bid));sh_resp_free(&r);
+  if(bid[0]){snprintf(q,sizeof(q),"chat/emotes?broadcaster_id=%s",bid);if(auth_helix_get(q,&r)==200)got+=tw_helix_list(r.data,0,1);sh_resp_free(&r);}
+  if(auth_helix_get("chat/emotes/global",&r)==200)got+=tw_helix_list(r.data,1,0);sh_resp_free(&r);
+ }else sh_resp_free(&r);
+ if(!got){   /* sin sesion valida para Helix: API publica de la web */
+  char body[400],h0[80];snprintf(body,sizeof(body),"{\"query\":\"{emoteSet(id:\\\"0\\\"){emotes{id token}} user(login:\\\"%s\\\"){subscriptionProducts{emotes{id token}}}}\"}",tw_chan);
+  snprintf(h0,sizeof(h0),"Client-Id: kimne78kx3ncx6brgo4mv6wki5h1ko");const char*h[]={h0,"Content-Type: application/json",NULL};
+  sh_request("POST","https://gql.twitch.tv/gql",h,body,NULL,&r);
+  if(sh_ok(&r)&&r.data){const char*p=jpath(r.data,"data.user.subscriptionProducts");
+   for(const char*sp=p?jarr_first(p):NULL;sp;sp=jarr_next(sp)){const char*ea=jget(sp,"emotes");for(const char*e=ea?jarr_first(ea):NULL;e;e=jarr_next(e)){char id[48]="",nm[40]="";const char*v;if((v=jget(e,"id")))jstr(v,id,sizeof(id));if((v=jget(e,"token")))jstr(v,nm,sizeof(nm));tw_add(id,nm,0,1,"");}}
+   p=jpath(r.data,"data.emoteSet.emotes");
+   for(const char*e=p?jarr_first(p):NULL;e;e=jarr_next(e)){char id[48]="",nm[40]="";const char*v;if((v=jget(e,"id")))jstr(v,id,sizeof(id));if((v=jget(e,"token")))jstr(v,nm,sizeof(nm));tw_add(id,nm,1,0,"");}}
+  sh_resp_free(&r);
+ }
+ sui_busy_end();
+}
+static int kb_emote(char*out,int cap){
+ if(!tw_n||strcmp(tw_chan,kb_chan_tw))tw_load(kb_chan_tw);
+ tw_seen();
+ if(!tw_n){sui_message("Emotes","No se pudieron cargar emotes y todavia no aparecio ninguno en el chat.");return 0;}
+ /* bloqueados al final de su grupo */
+ static emo_item_t sorted[TW_NEM];int n=0;for(int pass=0;pass<2;pass++)for(int i=0;i<tw_n;i++)if(tw_em[i].locked==pass)sorted[n++]=tw_em[i];
+ static const char*const groups[3]={"Canal","Globales","Vistos"};static int sel=0;char title[96];snprintf(title,sizeof(title),"Emotes - #%s",tw_chan);
+ int k=emote_grid(title,sorted,n,groups,3,&sel);if(k<0)return 0;
+ snprintf(out,cap,"%s",sorted[k].name);
+ return 1;}
+/* vista previa: las palabras que son emotes conocidos se dibujan como imagen */
+static int kb_preview(const char*buf,int x,int y,int w){
+ static tchat_t m;memset(&m,0,sizeof(m));const char*s=buf;size_t L=strlen(buf);if(L>190){s=buf+L-190;const char*q=strchr(s,' ');if(q)s=q+1;}
+ snprintf(m.text,sizeof(m.text),"%s",s);int len=strlen(m.text);
+ for(int i=0;i<len&&m.ne<8;){while(i<len&&m.text[i]==' ')i++;int j=i;while(j<len&&m.text[j]!=' ')j++;
+  if(j>i&&j-i<40){for(int k=0;k<tw_n;k++)if((int)strlen(tw_em[k].name)==j-i&&!strncmp(tw_em[k].name,m.text+i,j-i)){m.eat[m.ne]=i;m.elen[m.ne]=j-i;snprintf(m.eid[m.ne],sizeof(m.eid[0]),"%s",tw_em[k].id);m.ne++;break;}}
+  i=j;}
+ if(!m.ne)return -1;
+ return emote_preview_draw(&m,x,y,w);}
 void auth_compose(const char *channel,unsigned long broadcaster){
  if(!auth_ready()){ui_toast("Primero inicia sesion en Ajustes");return;}
  char text[351]="",hint[192];snprintf(hint,sizeof(hint),"Cuenta: %s / #%s. Enviar publica el mensaje. Max. 350 bytes.",auth_login(),channel);
 #ifdef AUTH_MOCK
  auth_test_stage=4;
 #endif
+ kb_chan_tw=channel?channel:"";sui_kb_emote_hook=kb_emote;sui_kb_preview=kb_preview;
  int ok=sui_text_input_ex("Escribir en el chat",hint,text,350,"Enviar","Escribi tu mensaje");
+ sui_kb_emote_hook=NULL;sui_kb_preview=NULL;
 #ifdef AUTH_MOCK
  auth_test_stage=5;
 #endif
- if(!ok)return;if(!auth_message_valid(text)){ui_toast("Mensaje vacio, muy largo o con caracteres de control. No enviado.");return;}
+ if(!ok)return;{size_t n=strlen(text);while(n&&text[n-1]==' ')text[--n]=0;}   /* rc8: sin el espacio final del selector */
+ if(!auth_message_valid(text)){ui_toast("Mensaje vacio, muy largo o con caracteres de control. No enviado.");return;}
 #ifdef WII_TWITCH_AUTH
  if(!chat_send_text(text))ui_toast("No enviado: chat conectando, ocupado o limite de frecuencia.");else ui_toast("En cola IRC. Un aviso del servidor puede rechazarlo.");
 #else

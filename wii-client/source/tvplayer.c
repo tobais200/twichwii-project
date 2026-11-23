@@ -81,6 +81,9 @@ void tp_force_reinit(void) { force_reinit = 1; }     /* pruebas: simula un init 
 /* ------------------------------------------------------------------ cola de segmentos */
 typedef struct seg { unsigned char *d; int n; struct seg *next; } seg_t;   /* n == 0: marca "nuevo init fMP4" */
 static volatile int reopen_req = 0;     /* el demuxer tiene que reabrirse (cambio el init fMP4, p. ej. anuncio) */
+#define REOPEN_SEGS 30                     /* ~60 s con segmentos de 2 s (Twitch) */
+static int segs_since_init = 0;
+static volatile int n_soft_reopen = 0;
 static volatile int vgen = 0;           /* generacion de parametros de video (cambia al reabrir) */
 static seg_t *sq_head = NULL, *sq_tail = NULL;
 static volatile int sq_bytes = 0, sq_count = 0;
@@ -418,7 +421,7 @@ static void *net_thread(void *arg) {
     unsigned char *last_init = NULL; int last_init_n = 0;
     mem_t m;
     int fails = 0, slow = 0, cpu_d0 = 0, cpu_f0 = 0;
-    cur_map[0] = 0;
+    cur_map[0] = 0; segs_since_init = 0;
     u64 cpu_t = 0;
     long long next_seq = -1;
     (void)arg;
@@ -517,7 +520,20 @@ static void *net_thread(void *arg) {
                         last_init = malloc(im.n); last_init_n = (int)im.n;
                         if (last_init) memcpy(last_init, im.d, im.n);
                         sq_push(im.d, (int)im.n);
+                        segs_since_init = 0;
                     }
+                }
+            }
+            /* rc9: en vivo fMP4 el demuxer mov agrega una entrada de indice por muestra (y un
+               item de frag_index por moof) que nunca se liberan; sus arrays crecen con
+               av_fast_realloc de a ~6% y dejan huecos en el heap (MEM2 bajaba 0,4-1 MB/min).
+               Cada REOPEN_SEGS segmentos se vuelve a mandar el mismo init para que el demuxer
+               se reabra con el indice vacio (los decodificadores se conservan: ver dmx_thread). */
+            if (seg_map[i] && last_init && last_init_n > 0 && !vod_mode) {
+                if (++segs_since_init >= REOPEN_SEGS) {
+                    unsigned char *ic = malloc(last_init_n);
+                    if (ic) { memcpy(ic, last_init, last_init_n); sq_push(NULL, 0); sq_push(ic, last_init_n); n_soft_reopen++; }
+                    segs_since_init = 0;
                 }
             }
             resolve(base, seg_uri[i], segu, sizeof(segu));
@@ -668,10 +684,8 @@ static void *dmx_thread(void *arg) {
             goto out;
         }
         ai = -1; vi = -1;
-        if (opened) {   /* reapertura: el audio puede cambiar de parametros */
-            avcodec_free_context(&ac); swr_free(&swr);
-        }
-        opened++;
+        /* reapertura: el audio se conserva si los parametros son iguales (ver abajo) */
+        opened++; (void)opened;
         if (pstate != TP_ERROR && pstate != TP_PLAYING) { snprintf(pstatus, sizeof(pstatus), "Llenando buffer..."); pstate = TP_BUFFERING; }
         while (!abort_req) {
             int r = av_read_frame(fc, pk);
@@ -679,20 +693,35 @@ static void *dmx_thread(void *arg) {
             AVStream *st = (pk->stream_index < (int)fc->nb_streams) ? fc->streams[pk->stream_index] : NULL;
             if (!st) { av_packet_unref(pk); continue; }
             int ct = st->codecpar->codec_type;
-            if (ai < 0 && ct == AVMEDIA_TYPE_AUDIO && (st->codecpar->codec_id == AV_CODEC_ID_AAC || st->codecpar->codec_id == AV_CODEC_ID_MP3 || st->codecpar->codec_id == AV_CODEC_ID_AAC_LATM)) {
+            if (ai < 0 && ct == AVMEDIA_TYPE_AUDIO && ac && ac->codec_id == st->codecpar->codec_id && ac->sample_rate == st->codecpar->sample_rate &&
+                ac->ch_layout.nb_channels == st->codecpar->ch_layout.nb_channels && ac->extradata_size == st->codecpar->extradata_size &&
+                (!ac->extradata_size || !memcmp(ac->extradata, st->codecpar->extradata, ac->extradata_size))) {
+                ai = pk->stream_index;   /* mismo audio tras reabrir: seguir con el mismo decoder */
+            } else if (ai < 0 && ct == AVMEDIA_TYPE_AUDIO && ac) {
+                avcodec_free_context(&ac); swr_free(&swr);   /* audio distinto (anuncio, otra calidad) */
+            }
+            if (ai < 0 && !ac && ct == AVMEDIA_TYPE_AUDIO && (st->codecpar->codec_id == AV_CODEC_ID_AAC || st->codecpar->codec_id == AV_CODEC_ID_MP3 || st->codecpar->codec_id == AV_CODEC_ID_AAC_LATM)) {
                 const AVCodec *c = avcodec_find_decoder(st->codecpar->codec_id);
                 ac = c ? avcodec_alloc_context3(c) : NULL;
                 if (ac && avcodec_parameters_to_context(ac, st->codecpar) >= 0 && avcodec_open2(ac, c, NULL) >= 0) { ai = pk->stream_index; has_audio = 1; }
                 else avcodec_free_context(&ac);
             }
             if (vi < 0 && ct == AVMEDIA_TYPE_VIDEO && st->codecpar->codec_id == AV_CODEC_ID_H264 && cur_vmode != VM_AUDIO) {
-                AVCodecParameters *np = avcodec_parameters_alloc();
-                avcodec_parameters_copy(np, st->codecpar);
+                const AVCodecParameters *cp = st->codecpar;
                 LWP_MutexLock(mtx);
-                AVCodecParameters *old = vpar;
-                vpar = np; vtb = st->time_base; vgen++;
+                int same = vpar && vpar->codec_id == cp->codec_id && vpar->width == cp->width && vpar->height == cp->height &&
+                           vpar->extradata_size == cp->extradata_size && (!cp->extradata_size || !memcmp(vpar->extradata, cp->extradata, cp->extradata_size)) &&
+                           vtb.num == st->time_base.num && vtb.den == st->time_base.den;
                 LWP_MutexUnlock(mtx);
-                if (old) avcodec_parameters_free(&old);
+                if (!same) {   /* rc9: mismo SPS/PPS tras reabrir -> mismo decoder (sin recrearlo) */
+                    AVCodecParameters *np = avcodec_parameters_alloc();
+                    avcodec_parameters_copy(np, cp);
+                    LWP_MutexLock(mtx);
+                    AVCodecParameters *old = vpar;
+                    vpar = np; vtb = st->time_base; vgen++;
+                    LWP_MutexUnlock(mtx);
+                    if (old) avcodec_parameters_free(&old);
+                }
                 vi = pk->stream_index; has_video = 1;
             }
             if (pk->stream_index == ai) {
@@ -946,4 +975,7 @@ void tp_stats(char *o, int sz) {
     snprintf(o, sz, "%s%s%dx%d  %.0f fps  buf %.1fs  red %lld KB  desc %d%s",
              variant_info, variant_info[0] ? " | " : "", stream_w, stream_h, fps_val,
              full_blocks() * BLKFR / 48000.0, net_bytes >> 10, ndropped, n_refresh ? "  token renovado" : "");
+#ifdef AUTOTEST
+    { size_t l = strlen(o); if ((int)l < sz) snprintf(o + l, sz - l, "  reab %d", n_soft_reopen); }
+#endif
 }

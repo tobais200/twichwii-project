@@ -547,6 +547,61 @@ void gfx_ui_cache_rows(int y0, int y1) {
 }
 
 /* rowsrc[y]: 0 = negro (o video), 1 = fila de la UI cacheada (video encima), 2 = UI opaca (sin video) */
+/* rc14: actualizar solo pedazos de la UI (emotes animados del chat) sin invalidar todo
+ * el cache: se marcan rectangulos del lienzo, se reconvierten solo esas columnas de esas
+ * filas a YUYV y gfx_composite las copia a cada XFB aunque este en modo parcial. */
+static short ui_mx0[SCR_H], ui_mx1[SCR_H], pend_c0[2][SCR_H], pend_c1[2][SCR_H];
+static int ui_mark_any, pend_any[2];
+void gfx_ui_mark_rect(int x0, int y0, int x1, int y1) {
+    if (y0 < 0) y0 = 0;
+    if (y1 > SCR_H) y1 = SCR_H;
+    if (x0 < 0) x0 = 0;
+    if (x1 > SCR_W) x1 = SCR_W;
+    if (x1 <= x0) return;
+    for (int y = y0; y < y1; y++) {
+        if (ui_mx1[y] <= ui_mx0[y]) { ui_mx0[y] = x0; ui_mx1[y] = x1; }
+        else { if (x0 < ui_mx0[y]) ui_mx0[y] = x0; if (x1 > ui_mx1[y]) ui_mx1[y] = x1; }
+        ui_mark_any = 1;
+    }
+}
+static void scan_row_part(int fy, u32 *d, int c0, int c1) {
+    if (fy < SAFE_Y || fy >= SAFE_Y + SAFE_H) return;
+    const u32 *s = canvas + rowmap[fy] * SCR_W, *s2 = canvas + rowmap1[fy] * SCR_W;
+    unsigned wy = roww[fy];
+    for (int x = c0; x < c1; x += 2) {
+        u32 a0 = s[colmap[x]], a1 = s[colmap1[x]], b0 = s[colmap[x + 1]], b1 = s[colmap1[x + 1]];
+        if (wy) { a0 = mix2(a0, s2[colmap[x]], wy); a1 = mix2(a1, s2[colmap1[x]], wy); b0 = mix2(b0, s2[colmap[x + 1]], wy); b1 = mix2(b1, s2[colmap1[x + 1]], wy); }
+        d[x / 2] = rgb2yuyv(mix2(a0, a1, colw[x]), mix2(b0, b1, colw[x + 1]));
+    }
+}
+int gfx_ui_commit_rows(void) {
+    static short f0s[SCR_H], f1s[SCR_H];
+    int n = 0;
+    if (!ui_mark_any) return 0;
+    ui_mark_any = 0;
+    if (!uicache || !ui_cache_valid) { memset(ui_mx0, 0, sizeof ui_mx0); memset(ui_mx1, 0, sizeof ui_mx1); return 0; }
+    safe_maps();
+    for (int f = 0; f < SCR_H; f++) { f0s[f] = FB_W; f1s[f] = 0; }
+    for (int y = 0; y < SCR_H; y++) if (ui_mx1[y] > ui_mx0[y]) {
+        int r0, r1, c0 = FB_W, c1 = 0;
+        safe_rows(y, y + 1, &r0, &r1);
+        for (int i = 0; i < FB_W; i++) if (colmap1[i] >= ui_mx0[y] && colmap[i] < ui_mx1[y]) { if (i < c0) c0 = i; c1 = i + 1; }
+        c0 &= ~1; c1 = (c1 + 1) & ~1; if (c1 > FB_W) c1 = FB_W;
+        for (int f = r0; f < r1; f++) { if (c0 < f0s[f]) f0s[f] = c0; if (c1 > f1s[f]) f1s[f] = c1; }
+        ui_mx0[y] = ui_mx1[y] = 0;
+    }
+    for (int f = 0; f < SCR_H; f++) if (f1s[f] > f0s[f]) {
+        scan_row_part(f, uicache + f * (FB_W / 2), f0s[f], f1s[f]);
+        for (int k = 0; k < 2; k++) {
+            if (pend_c1[k][f] <= pend_c0[k][f]) { pend_c0[k][f] = f0s[f]; pend_c1[k][f] = f1s[f]; }
+            else { if (f0s[f] < pend_c0[k][f]) pend_c0[k][f] = f0s[f]; if (f1s[f] > pend_c1[k][f]) pend_c1[k][f] = f1s[f]; }
+        }
+        n += f1s[f] - f0s[f];
+    }
+    if (n) pend_any[0] = pend_any[1] = 1;
+    return n;   /* pixeles del XFB reconvertidos */
+}
+void gfx_get_clip(int *x0, int *y0, int *x1, int *y1) { *x0 = cx0; *y0 = cy0; *x1 = cx1; *y1 = cy1; }
 void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsigned char *rowsrc) {
     static int xm[FB_W];
     if (!uicache || !ui_cache_valid) gfx_ui_cache_rows(0, SCR_H);
@@ -575,6 +630,14 @@ void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsi
     if(rowsrc)for(int y=0;y<SCR_H;y++)sig=(sig^rowsrc[y])*16777619u;
     int partial=xfb_gen[cur]==ui_gen&&xfb_sig[cur]==sig&&p;
     xfb_gen[cur]=ui_gen;xfb_sig[cur]=sig;
+    if(partial&&pend_any[cur])for(int y=0;y<SCR_H&&y+yoff<h;y++)if(pend_c1[cur][y]>pend_c0[cur][y]){
+        u32 *d=dst+(y+yoff)*stride+xoff;
+        int src=rowsrc?rowsrc[rowmap[y]]:1,c0=pend_c0[cur][y]/2,c1=pend_c1[cur][y]/2;
+        if(src)memcpy(d+c0,uicache+y*(FB_W/2)+c0,(c1-c0)*4);
+        else for(int x=c0;x<c1;x++)d[x]=0x10801080;
+        if(p&&src!=2&&y>=by&&y<by+bh)for(int x=bx/2>c0?bx/2:c0;x<(bx+bw)/2&&x<c1;x++)if(x>=0)d[x]=0x10801080;
+    }
+    if(pend_any[cur]){memset(pend_c0[cur],0,sizeof pend_c0[cur]);memset(pend_c1[cur],0,sizeof pend_c1[cur]);pend_any[cur]=0;}
     int y0=partial?ry:0,y1=partial?ry+rh:SCR_H;
     if(y0<0)y0=0;
     if(y1>SCR_H)y1=SCR_H;

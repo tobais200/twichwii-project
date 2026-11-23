@@ -42,6 +42,10 @@ int  utf8_next(const char **s);
 u32  gfx_mix(u32 a, u32 b, int t);   /* t 0..255 */
 void gfx_blit_round(const u32 *px, int pw, int ph, int x, int y, int r);   /* r = pw/2: circulo */
 void gfx_blit_scaled(const u32 *px, int pw, int ph, int x, int y, int w, int h);
+/* rc14: filas de UI actualizadas sin redibujar todo (emotes animados) */
+void gfx_ui_mark_rect(int x0, int y0, int x1, int y1);
+int  gfx_ui_commit_rows(void);
+void gfx_get_clip(int *x0, int *y0, int *x1, int *y1);
 
 /* iconos dibujados con primitivas (arte propio) */
 enum { IC_NONE = 0, IC_NOTE, IC_SEARCH, IC_SD, IC_MENU, IC_PLAY, IC_PAUSE, IC_NEXT, IC_PREV,

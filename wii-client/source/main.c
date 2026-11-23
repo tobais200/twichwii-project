@@ -1063,6 +1063,7 @@ static void watch_status(char *s, int sz) {
 static void draw_chat_panel(void) {
     static tchat_t msgs[24];
     int n = chat_get(msgs, 24), i, k;
+    chat_anim_begin();   /* rc8: la lista de emotes animados se arma de nuevo */
     gfx_rect(CHAT_X, 0, CHAT_W, SCR_H, C_BG2);
     gfx_rect(CHAT_X, 0, 1, SCR_H, 0x000000);
     text_bold(&font_small, CHAT_X + 10, 10, "CHAT DEL DIRECTO", C_TEXT);
@@ -1212,14 +1213,17 @@ static int watch_frame(int input) {
             gfx_ui_cache_rows(0, SCR_H);
             fs_chat_gen = g; fs_last_osd = now;
         }
+        /* rc8: emotes animados: sólo sus filas, sin redibujar el panel (<=12,5 cuadros/s) */
+        int anim = !ui_dirty && chat_anim_tick() > 0;
         int newpic = has && (pic != fs_last_pic || pic->pts != fs_last_pts);
-        if (!newpic && !ui_dirty) return 0;
+        if (!newpic && !ui_dirty && !anim) return 0;
         if (has) { fs_last_pic = pic; fs_last_pts = pic->pts; }
         memset(rowsrc, 1, sizeof(rowsrc));
         gfx_composite(has ? pic : NULL, 0, 0, vw, vh, rowsrc);
         return 1;
     }
     int vw = SCR_W, vh = wide ? SCR_H : 360, vy = (SCR_H - vh) / 2;
+    chat_anim_reset();   /* rc8: chat oculto: nada que animar */
     int osd = ticks_to_millisecs(now - osd_t) < 5000 || tp_state() != TP_PLAYING;
     if (!pic || !tp_has_video()) {
         if (!input && ticks_to_millisecs(now - fs_last_full) < 33) return 0;
@@ -1383,6 +1387,20 @@ static int at_step = 0;
 static int at_ms(void) { return (int)ticks_to_millisecs(gettime() - at_ts); }
 static void at_stats(void) {
     static u64 last = 0;
+    {   /* rc14/rc8: memoria cada 10 s (mallinfo + arenas + imagenes/animaciones) */
+        static u64 mlast = 0; static int pc0 = 0; static unsigned r0 = 0, t0a = 0;
+        if (atlog && (!mlast || ticks_to_millisecs(gettime() - mlast) >= 10000)) {
+            char mm[300]; unsigned rr, tt; thumbs_mem(mm, sizeof mm); chat_anim_stats(&rr, &tt);
+            int el = mlast ? (int)ticks_to_millisecs(gettime() - mlast) : 1;
+            LOG("mem: t=%us %s | vis_anim=%d anim_ticks/s=%.1f anim_px/s=%.0f presents/s=%.1f video_fps=%.1f screen=%d",
+                (unsigned)ticks_to_secs(gettime() - t_start), mm, chat_anim_count(), (tt - t0a) * 1000.0 / el, (rr - r0) * 1000.0 / el,
+                (gfx_present_count - pc0) * 1000.0 / el, tp_fps(), screen);
+            mlast = gettime(); pc0 = gfx_present_count; r0 = rr; t0a = tt;
+#ifdef MEMTRACE
+            { static int mt = 0; extern void memtrace_dump(FILE *, const char *); char tg[24]; snprintf(tg, sizeof tg, "t=%us", (unsigned)ticks_to_secs(gettime() - t_start)); if (mt++ % 6 == 0) memtrace_dump(atlog, tg); }
+#endif
+        }
+    }
     if (!atlog || screen != SCR_WATCH || ticks_to_millisecs(gettime() - last) < 2000) return;
     char st[200]; tp_stats(st, sizeof(st));
     last = gettime();
@@ -1503,6 +1521,36 @@ u32 at_hook(void) {
     case 1:if(at_wait(SCR_CHAN,9000)){at_next();start_vod(0);}break;
     case 2:if(at_wait(SCR_WATCH,45000)){LOG("autotest VOD rc3 end");at_next();quit=1;}break;
     }
+#elif defined(AUTOTEST_PICKER)
+    /* rc8: selector de emotes en el teclado del chat; el envio es SEND_DRYRUN (no sale nada) */
+    switch(at_step){
+    case 0: if(at_wait(SCR_HOME,8000)&&live_loaded){at_next();open_channel(NULL,AT_CHAN);}break;
+    case 1: if(at_wait(SCR_CHAN,6000)){at_next();start_watch();}break;
+    case 2: if(at_wait(SCR_WATCH,25000)){at_next();LOG("picker: abrir teclado");at_ptr(6,474);b=WPAD_BUTTON_1;}break;
+    case 3: if(at_ms()>3000){at_next();at_type("hola ");}break;
+    case 4: if(at_ms()>1500){at_next();LOG("picker: tecla 2 -> grilla");b=WPAD_BUTTON_2;}break;
+    case 5: if(at_ms()>14000){at_next();LOG("picker: shot grilla canal (t=%.0f)",ticks_to_millisecs(gettime()-t_start)/1000.0);}break;
+    case 6: if(at_ms()>4000){at_next();b=WPAD_BUTTON_PLUS;LOG("picker: + -> globales");}break;
+    case 7: if(at_ms()>9000){at_next();LOG("picker: shot grilla globales (t=%.0f)",ticks_to_millisecs(gettime()-t_start)/1000.0);}break;
+    case 8: if(at_ms()>3000){at_next();b=WPAD_BUTTON_RIGHT;}break;
+    case 9: if(at_ms()>600){at_next();at_ptr((SCR_W-600)/2+20+3*50+24,30+102+50+24);LOG("picker: puntero sobre la celda 4 de la fila 2");}break;
+    case 10: if(at_ms()>1200){at_next();b=WPAD_BUTTON_A;LOG("picker: A (puntero) -> insertar");}break;
+    case 11: if(at_ms()>2500){at_next();at_ptr(6,474);at_type("y ");}break;
+    case 12: if(at_ms()>1500){at_next();b=WPAD_BUTTON_2;}break;
+    case 13: if(at_ms()>5000){at_next();b=WPAD_BUTTON_MINUS;}break;
+    case 14: if(at_ms()>4000){at_next();b=WPAD_BUTTON_A;}break;
+    case 15: if(at_ms()>4000){at_next();LOG("picker: shot vista previa (t=%.0f)",ticks_to_millisecs(gettime()-t_start)/1000.0);}break;
+    case 16: if(at_ms()>4000){at_next();b=WPAD_BUTTON_PLUS;LOG("picker: + -> Enviar (dry run)");}break;
+    case 17: if(at_ms()>5000){at_next();LOG("picker end");quit=1;}break;
+    }
+#elif defined(AUTOTEST_SOAK)
+    /* rc14/rc8: soak de memoria: canal con chat real + 3 emotes animados distintos cada 2,5 s */
+    switch(at_step){
+    case 0: if(at_wait(SCR_HOME,8000)&&live_loaded){at_next();open_channel(NULL,AT_CHAN);}break;
+    case 1: if(at_wait(SCR_CHAN,6000)){at_next();start_watch();}break;
+    case 2: if(at_wait(SCR_WATCH,2500)){static int k=0;static u64 s0=0;if(!s0)s0=gettime();at_ts=gettime();chat_test_soak(k++);
+             if(ticks_to_millisecs(gettime()-s0)>=(u64)AT_SOAK_MIN*60000){LOG("soak end k=%d",k);at_next();quit=1;}}break;
+    }
 #elif defined(AUTOTEST_EMOTES)
     switch(at_step){
     case 0: if(at_wait(SCR_HOME,8000)&&live_loaded){at_next();open_channel(NULL,AT_CHAN);}break;
@@ -1531,6 +1579,9 @@ static u64 last_full = 0;
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     twitchwii_mem2_init();
+#ifdef MEMTRACE
+    { extern void memtrace_start(void); memtrace_start(); }
+#endif
     gfx_init();
     input_init();
     fat_ok = fatInitDefault();

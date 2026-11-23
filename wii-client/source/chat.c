@@ -159,6 +159,10 @@ int chat_get(tchat_t *out, int max) {
 /* The UI only enqueues; the IRC worker is the sole socket owner/writer. */
 int chat_send_text(const char *text) {
  if(!mtx_ok||!auth_message_valid(text))return 0;
+#ifdef SEND_DRYRUN
+ /* rc8 PRUEBA: no se envia nada; se guarda la linea IRC que se mandaria */
+ {FILE*f=fopen("sd:/twitchwii-test/dryrun-payload.txt","a");if(f){fprintf(f,"PRIVMSG #%s :%s\n",login,text);fclose(f);}push("Sistema","PRUEBA: no enviado (payload guardado en la SD)",0,1);return 1;}
+#endif
  LWP_MutexLock(mtx);int ok=run&&authenticated&&write_ready&&!outgoing[0]&&(!last_send||ticks_to_millisecs(gettime()-last_send)>=2000);
  if(ok){snprintf(outgoing,sizeof(outgoing),"%s",text);last_send=gettime();}LWP_MutexUnlock(mtx);return ok;
 }
@@ -166,6 +170,16 @@ void chat_local_echo(const char *name,const char *text){if(mtx_ok)push(name,text
 
 int chat_auth_rejected(void){if(!mtx_ok)return 0;LWP_MutexLock(mtx);int r=rejected;LWP_MutexUnlock(mtx);return r;}
 
+#ifdef AUTOTEST_SOAK
+static const char *soak_id[]={"emotesv2_004b58fc8f3b41f7b48a4c06aeff1540","emotesv2_0b84aba793f74b429b5f4c0375f1c8cb","emotesv2_155841205da744199051303d7421a19e","emotesv2_2ac70f7402324cd0926246c9d8a37ba2","emotesv2_3a5b59f49ec2433bb76a0071ec4997bb","emotesv2_408f173c2508459c9055bc9d6addd166","emotesv2_49ae8b88111a4b34826575368091fc56","emotesv2_507e418dc024418eacfb92751d345ea7","emotesv2_584a7f8bd36046b1ad96eb2d7ab8a5e8","emotesv2_64820eca5e6444479e04e77c1356bca4","emotesv2_695dc2c4d953441ab37a510befd00194","emotesv2_6a06e06a83a3442cb3784528d5d7c674","emotesv2_7573eea6f0e74d91a42d22077b017a03","emotesv2_9de08b0452e24e3a9c4e75c7b5adf263","emotesv2_c13937fb5d0341ee9fb0b7da1a6ad13b","emotesv2_c2f18c53b60f4ab6a3141d52f5c741fd","emotesv2_d210039682c6418086b5194ca24e70bd","emotesv2_d9dc5705d728493ebf3f0ae0be3fc578","emotesv2_e2fe99e21a5a4e8891c5d16bc893a4be","emotesv2_e3d80f41d5d8441d94f83b549ef68706","emotesv2_f95ba7ced8bc4c19886ceafc3294c1f7"};
+static const char *soak_tok[]={"ohneDrilla","ohneRIP","ohneLamonting","kaicSturdyy","xqcSlam","kaicNaenae","ohnePIXEL","kaicWAVE","ohneCool","ohneWAS","ohneExplode","kaicFireMGM","kaicGimmiegold","ohneGABE","xqcDitch","xqcCursed","xqcSus","xqcCheer","ohneJeepers","ohneVas","ohnePls"};
+/* rc8 soak: 3 emotes (animados casi todos) por mensaje, rotando por la lista */
+void chat_test_soak(int k){char t[400],tag[600];int n=sizeof(soak_id)/sizeof(soak_id[0]),p=0,q=0;if(!mtx_ok)return;
+ p=snprintf(t,sizeof t,"soak%d ",k%10);
+ for(int j=0;j<3;j++){int e=(k*3+j)%n,L=strlen(soak_tok[e]);q+=snprintf(tag+q,sizeof tag-q,"%s%s:%d-%d",j?"/":"",soak_id[e],p,p+L-1);p+=snprintf(t+p,sizeof t-p,"%s ",soak_tok[e]);}
+ snprintf(t+p,sizeof t-p,"Kappa");q+=snprintf(tag+q,sizeof tag-q,"/25:%d-%d",p,p+4);
+ push_e("Soak",t,0x53FC18,0,tag);}
+#endif
 #ifdef AUTOTEST_EMOTES
 void chat_test_inject(void){if(!mtx_ok)return;
  /* "Kappa hola LUL animado PogChamp y un texto largo para probar el corte de linea Kappa" */

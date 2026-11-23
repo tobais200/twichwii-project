@@ -117,7 +117,11 @@ int auth_configured(void){
 }
 const char *auth_client_id(void){return cid;}
 static const char*kick_endpoint(const char*part){static char out[448];snprintf(out,sizeof(out),"%s/%s",relay,part);return out;}
+#ifdef SEND_DRYRUN
+int auth_ready(void){return 1;}   /* rc8 PRUEBA: sin cuenta real; nada se envia */
+#else
 int auth_ready(void){return ready;}
+#endif
 const char *auth_access_token(void){return ready&&token[0]?token:"";}
 int auth_has_session(void){return token[0]!=0;}
 const char *auth_login(void){return name;}
@@ -295,6 +299,26 @@ int auth_mock_complete(void){
 #ifdef WII_TWITCH_AUTH
 int auth_follows_allowed(void){return ready&&follow_scope&&user_id[0];}
 const char *auth_user_id(void){return user_id;}
+/* rc8: GET a Helix con la sesion actual (emotes del chat: no piden permisos extra). */
+long auth_helix_get(const char *pathq,sh_resp_t *r){
+ memset(r,0,sizeof(*r));if(!pathq||strlen(pathq)>400)return 0;
+ if(auth_due())auth_ensure();
+ if(!ready||!token[0])return 0;
+ char url[480],a[TOKEN_MAX+32],c[160];
+#ifdef AUTH_MOCK
+ snprintf(url,sizeof(url),"http://127.0.0.1:8989/helix/%s",pathq);
+#else
+ snprintf(url,sizeof(url),"https://api.twitch.tv/helix/%s",pathq);
+#endif
+ for(int t=0;t<2;t++){
+  snprintf(a,sizeof(a),"Authorization: Bearer %s",token);snprintf(c,sizeof(c),"Client-Id: %s",cid);
+  const char*h[]={a,c,"Accept: application/json",NULL};
+  sh_request("GET",url,h,NULL,NULL,r);memset(a,0,sizeof(a));
+  if(r->code!=401||t||!auth_refresh_now())break;
+  sh_resp_free(r);memset(r,0,sizeof(*r));
+ }
+ return r->code;
+}
 long auth_follow_read(int endpoint,const char *query,char *out,size_t cap){
  if(!out||!cap)return 0;out[0]=0;if(auth_due()&&!auth_ensure())return 0;if(!auth_ready())return 401;if(!auth_follows_allowed())return 403;
  static const char *paths[]={"users","channels/followed","streams/followed"};if(endpoint<0||endpoint>2||!query||strlen(query)>2048)return 0;
