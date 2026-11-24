@@ -1,0 +1,16 @@
+# Secrets and local config (never commit)
+.env
+.env.*
+*.env
+config.json
+secrets.*
+*.pem
+*.key
+
+# Build output
+build/
+*.o
+*.elf
+*.dol
+*.wad
+*.zip
