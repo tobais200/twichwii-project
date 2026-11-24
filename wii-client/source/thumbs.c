@@ -30,6 +30,7 @@
 #include <ogc/lwp_watchdog.h>
 #include <curl/curl.h>
 #include "tv.h"
+#include "guard.h"
 #include "image_decode.h"
 #include "clock_sync.h"
 #ifndef BENCH_WAIT
@@ -66,7 +67,7 @@ typedef struct {
     kimg_t img;
     kanim_t *anim; int anim_want, anim_st; u32 anim_used, anim_retry;
 } slot_t;
-typedef struct { CURL *c; unsigned char *buf; int cap, n, lim; volatile int active; int id; char eb[CURL_ERROR_SIZE]; } worker_t;
+typedef struct { CURL *c; unsigned char *buf; int cap, n, lim; volatile int active; int id; lwp_t th; char eb[CURL_ERROR_SIZE]; } worker_t;
 static slot_t slots[NSLOT];
 static worker_t workers[NWORK];
 static mutex_t mtx;
@@ -541,10 +542,10 @@ void thumbs_init(void) {
     TLOG("thumbs rc13: %d hilos, %d slots, cache disco", NWORK, NSLOT);
 #endif
     for (int i = 0; i < NWORK; i++) {
-        lwp_t th;
+        workers[i].th = LWP_THREAD_NULL;
         workers[i].id = i; workers[i].cap = 256 * 1024; workers[i].buf = malloc(workers[i].cap);
         if (!workers[i].buf) workers[i].cap = 0;
-        LWP_CreateThread(&th, thread, &workers[i], NULL, 128 * 1024, 30);
+        LWP_CreateThread(&workers[i].th, thread, &workers[i], NULL, 128 * 1024, 30);
     }
 #ifdef IMGBENCH
     bench_start();
@@ -558,7 +559,15 @@ void thumbs_pause(int p) {
     LWP_MutexLock(mtx); paused = p; LWP_MutexUnlock(mtx);
     /* Do not enter another curl transfer until the workers released their image handles
        (emotes are tiny and keep going while the video plays). */
-    while (p && any_active(1)) { ui_busy_tick(); usleep(10000); }
+    /* rc16: espera acotada (antes sin limite: un worker trabado en un socket de IOS congelaba
+       la pantalla cada cuadro del video). A los 1,5 s se le cortan los sockets; a los 3 s se sigue. */
+    u64 t0 = gettime(); int killed = 0;
+    while (p && any_active(1)) {
+        u32 ms = ticks_to_millisecs(gettime() - t0);
+        if (ms > 1500 && !killed) { killed = 1; for (int i = 0; i < NWORK; i++) if (workers[i].active == 1 && workers[i].th != LWP_THREAD_NULL) guard_kill_socks(workers[i].th); }
+        if (ms > 3000) break;
+        ui_busy_tick(); usleep(10000);
+    }
 }
 void thumbs_frame(void) { tick++; }   /* una vez por cuadro dibujado */
 

@@ -12,6 +12,7 @@
 #include <wiiuse/wpad.h>
 #include <wiisocket.h>
 #include <curl/curl.h>
+#include "guard.h"
 
 #include "cacert_pem.h"
 #include "tv.h"
@@ -154,6 +155,7 @@ void sh_curl_common(void *c, char *errbuf) {
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+    guard_curl(curl);   /* rc16: sockets registrados (el vigilante los puede cortar) */
 }
 
 char *sh_urlencode(const char *s) {

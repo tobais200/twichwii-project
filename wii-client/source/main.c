@@ -23,6 +23,8 @@
 #include <fat.h>
 #include <curl/curl.h>
 #include "tv.h"
+#include "guard.h"
+#include "dlog.h"
 #include "social.h"
 #include "mem2.h"
 static int chat_write_pressed,watch_social_pressed;
@@ -708,7 +710,8 @@ static void draw_home(void) {
         else { gfx_rect(MX, HDR_Y - 2, 36, 48, C_ACCENT2); gfx_text_c(&font_bold, MX + 18, HDR_Y + 13, "?", 0xFFFFFF); }
         text_bold(&font_title, MX + 46, HDR_Y - 4, cur_game_name, C_TEXT);
         char v[24], l[80]; fmt_count(cur_game_viewers, v, sizeof(v));
-        snprintf(l, sizeof(l), "%s espectadores  \xc2\xb7  Idioma: %s", v, k_lang_names[k_lang]);
+        if (cur_game_viewers > 0) snprintf(l, sizeof(l), "%s espectadores  \xc2\xb7  Idioma: %s", v, k_lang_names[k_lang]);
+        else snprintf(l, sizeof(l), "Idioma: %s", k_lang_names[k_lang]);
         gfx_text_fit(&font_small, MX + 46, HDR_Y + 24, l, C_DIM, MW - 150);
         if (ui_click(MX + 46, HDR_Y + 22, MW - 150, 20)) h_act = HA_LANG;
         if (ui_button(MX + MW - 100, HDR_Y + 2, 100, 26, "Explorar", IC_BACK, BS_NORMAL, 0)) h_act = HA_BACKCAT;
@@ -849,8 +852,10 @@ static void draw_browse(void) {
             free(ln);
         }
         gfx_text_fit(&font_bold, x, y + BH + 4, c->name, foc ? C_LINK : C_TEXT, BW + 20);
-        char v[24], l[48]; fmt_count(c->viewers, v, sizeof(v)); snprintf(l, sizeof(l), "%s espectadores", v);
-        gfx_text_fit(&font_small, x, y + BH + 22, l, C_DIM, BW + 20);
+        if (c->viewers > 0) {   /* rc11: sin dato (o 0) no se muestra "0 espectadores" */
+            char v[24], l[48]; fmt_count(c->viewers, v, sizeof(v)); snprintf(l, sizeof(l), "%s espectadores", v);
+            gfx_text_fit(&font_small, x, y + BH + 22, l, C_DIM, BW + 20);
+        }
         if (ui_click(x, y - 6, BW + 6, BCH)) { b_act = 1; b_arg = i; }
         if (h) bsel = i;
         UI.down = save;
@@ -1543,6 +1548,20 @@ u32 at_hook(void) {
     case 16: if(at_ms()>4000){at_next();b=WPAD_BUTTON_PLUS;LOG("picker: + -> Enviar (dry run)");}break;
     case 17: if(at_ms()>5000){at_next();LOG("picker end");quit=1;}break;
     }
+#elif defined(AUTOTEST_RC11)
+    /* rc11: emotes en el mensaje propio + pruebas del vigilante (GUARD_TEST) */
+    switch(at_step){
+    case 0: if(at_wait(SCR_HOME,8000)&&live_loaded){at_next();open_channel(NULL,AT_CHAN);}break;
+    case 1: if(at_wait(SCR_CHAN,6000)){at_next();start_watch();}break;
+    case 2: if(at_wait(SCR_WATCH,4000)){at_next();if(!watch_details){b=WPAD_BUTTON_PLUS;}LOG("rc11: chat visible");}break;
+#ifdef AUTOTEST_OWNEMOTE
+    case 3: if(at_ms()>25000){extern void auth_test_own_echo(const char*,const char*);at_next();auth_test_own_echo(pinfo.slug,"hola Kappa que buen stream LUL PogChamp");LOG("rc11: eco propio inyectado");}break;
+    case 4: if(at_ms()>12000){at_next();LOG("rc11: shot emotes propios (t=%.0f)",ticks_to_millisecs(gettime()-t_start)/1000.0);}break;
+    case 5: if(at_ms()>15000){at_next();quit=1;}break;
+#elif defined(GUARD_TEST)
+    case 3: if(at_ms()>25000){at_next();LOG("rc11: bloqueo simulado del hilo principal (esperando HOME de xdotool)");guard_test_hang(1);}break;
+#endif
+    }
 #elif defined(AUTOTEST_SOAK)
     /* rc14/rc8: soak de memoria: canal con chat real + 3 emotes animados distintos cada 2,5 s */
     switch(at_step){
@@ -1589,6 +1608,9 @@ int main(int argc, char **argv) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     if (fat_ok) cfg_load();
     t_start = gettime();
+    dlog_init(fat_ok);   /* rc11: log de diagnostico en sd:/apps/TwitchWii/log.txt (como KickWii) */
+    dlog("TwichWii " TV_VERSION " | IOS %d | pantalla %s | SD %s", IOS_GetVersion(), gfx_widescreen() ? "16:9" : "4:3", fat_ok ? "ok" : "no");
+    guard_init();        /* rc11: vigilante del hilo principal (HOME de emergencia, log, corta sockets) */
     {
         extern unsigned char __bss_end[];
         u32 a1 = (u32)SYS_GetArena1Hi() - (u32)SYS_GetArena1Lo();
@@ -1619,7 +1641,12 @@ int main(int argc, char **argv) {
     while (SYS_MainLoop() && !quit) {
         grid_y_extra = (screen == SCR_HOME && !cur_game[0] && nhome_cats) ? SHELF_H : 0;
         if(chat_auth_rejected()){chat_stop();auth_refresh_now();watch_chat_started=0;} /* rc12: renovar en vez de borrar la sesion guardada */
-        if(auth_due()){chat_stop();thumbs_pause(1);auth_ensure();if(screen==SCR_WATCH&&watch_chat_started)chat_start(pinfo.slug);if(screen!=SCR_WATCH)thumbs_pause(0);}
+        guard_where("loop: log");
+        dlog_flush(0);
+        /* rc11: la revision periodica de la sesion ya no corre mientras se mira un directo (cortaba el
+           chat y hacia un pedido HTTP bloqueante en el hilo principal); se hace al salir del directo. */
+        if(screen!=SCR_WATCH&&auth_due()){guard_where("loop: auth_ensure");chat_stop();thumbs_pause(1);auth_ensure();thumbs_pause(0);}
+        guard_where("loop: botones");
 
         u32 d = in_poll();
         int k;
@@ -1652,8 +1679,11 @@ int main(int argc, char **argv) {
                 }
                 else ui_toast(watching_vod ? "Los VODs no tienen chat." : "Los VODs no tienen chat.");
             }
+            guard_where("watch: tp_picture");
             curpic = tp_picture();
+            guard_where("watch: dibujo");
             int wrote = watch_frame(d != 0);
+            guard_where("watch: acciones");
             if(watch_social_pressed||(d&(WPAD_BUTTON_MINUS|WPAD_BUTTON_2))){int sub=watch_social_pressed?watch_social_pressed==2:!!(d&WPAD_BUTTON_2);watch_social_pressed=0;chat_stop();social_screen(pinfo.slug,sub);if(watch_chat_started)chat_start(pinfo.slug);thumbs_pause(1);fs_layout_was=fs_osd_was=-1;fs_last_pic=NULL;osd_t=gettime();curpic=NULL;continue;}
             if(chat_write_pressed||(d&WPAD_BUTTON_1)){chat_write_pressed=0;if(!auth_ready()){chat_stop();auth_screen();if(watch_chat_started)chat_start(pinfo.slug);}if(auth_ready()&&!watch_chat_started){watch_chat_started=1;chat_start(pinfo.slug);}if(auth_ready())auth_compose(pinfo.slug,0);thumbs_pause(1);fs_layout_was=fs_osd_was=-1;fs_last_pic=NULL;osd_t=gettime();curpic=NULL;continue;}
 
@@ -1771,6 +1801,7 @@ int main(int argc, char **argv) {
         }
     }
     stop_watch();
+    dlog("salida"); dlog_flush(1);
     if (atlog) fclose(atlog);
     gfx_clear(C_BG);
     ui_logo(SCR_W / 2 - 24, 180, 48);

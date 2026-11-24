@@ -11,6 +11,7 @@
 #include "gfx.h"
 #include "tv.h"
 #include "mem2.h"
+#include "guard.h"
 
 static GXRModeObj mode_storage, *rmode;
 static int aspect_mode=0, system_wide=0;
@@ -176,6 +177,7 @@ static inline u32 rgb2yuyv(u32 a, u32 b) {
 }
 
 void gfx_present(void) {
+    guard_beat();
     cur ^= 1;
     xfb_gen[cur] = 0;
     u32 *dst = (u32 *)xfb[cur];

@@ -29,6 +29,8 @@
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include "tv.h"
+#include "guard.h"
+#include "dlog.h"
 
 /* ------------------------------------------------------------------ audio */
 #define NBLK      64
@@ -416,7 +418,7 @@ static int refresh_token(char *url, int usz) {
     return open_master(purl, url, usz);
 }
 
-static void *net_thread(void *arg) {
+static void *net_thread_body(void *arg) {
     static char url[8192], segu[4096], cur_map[4096], mapu[4096];
     unsigned char *last_init = NULL; int last_init_n = 0;
     mem_t m;
@@ -653,7 +655,7 @@ static const char *detect_format(void) {
     return NULL;
 }
 
-static void *dmx_thread(void *arg) {
+static void *dmx_thread_body(void *arg) {
     AVFormatContext *fc = NULL;
     AVIOContext *io = NULL;
     AVCodecContext *ac = NULL;
@@ -802,7 +804,7 @@ static void store_frame(AVFrame *f, double pts) {
     pic_state[k] = P_READY;
 }
 
-static void *vid_thread(void *arg) {
+static void *vid_thread_body(void *arg) {
     AVCodecContext *vc = NULL;
     AVFrame *fr = av_frame_alloc();
     u64 last_store = 0;
@@ -861,12 +863,99 @@ static void *vid_thread(void *arg) {
     return NULL;
 }
 
+/* ================================================================== rc11: hilos con aviso de fin */
+static volatile int net_done = 1, dmx_done = 1, vid_done = 1;
+static void *net_thread(void *a) { net_thread_body(a); net_done = 1; return NULL; }
+static void *dmx_thread(void *a) { dmx_thread_body(a); dmx_done = 1; return NULL; }
+static void *vid_thread(void *a) { vid_thread_body(a); vid_done = 1; return NULL; }
+static int start_threads(void) {
+    net_done = dmx_done = vid_done = 0;
+    if (LWP_CreateThread(&th_net, net_thread, NULL, NULL, 128 * 1024, 72) < 0) { th_net = LWP_THREAD_NULL; net_done = dmx_done = vid_done = 1; return 0; }
+    if (LWP_CreateThread(&th_dmx, dmx_thread, NULL, NULL, 256 * 1024, 70) < 0) { th_dmx = LWP_THREAD_NULL; dmx_done = vid_done = 1; abort_req = 1; return 0; }
+    if (LWP_CreateThread(&th_vid, vid_thread, NULL, NULL, 256 * 1024, 40) < 0) { th_vid = LWP_THREAD_NULL; vid_done = 1; abort_req = 1; return 0; }
+    return 1;
+}
+/* espera acotada a que los 3 hilos terminen (abort_req ya puesto), cortando los sockets del de red */
+static void wait_threads(u32 max_ms) {
+    u64 t0 = gettime(), lastk = 0;
+    guard_where("tp_stop: esperando hilos de video");
+    while (!(net_done && dmx_done && vid_done) && ticks_to_millisecs(gettime() - t0) < max_ms) {
+        u64 now = gettime();
+        if (ticks_to_millisecs(now - t0) > 1000 && (!lastk || ticks_to_millisecs(now - lastk) > 2000)) { lastk = now; if (th_net != LWP_THREAD_NULL && !net_done) guard_kill_socks(th_net); }
+        guard_beat(); usleep(10000);
+    }
+    if (!(net_done && dmx_done && vid_done)) dlog("player: hilos sin terminar (red %d demux %d video %d)", !net_done, !dmx_done, !vid_done);
+}
+static void join_and_clean(void) {
+    int i;
+    if (th_vid != LWP_THREAD_NULL) { LWP_JoinThread(th_vid, NULL); th_vid = LWP_THREAD_NULL; }
+    if (th_dmx != LWP_THREAD_NULL) { LWP_JoinThread(th_dmx, NULL); th_dmx = LWP_THREAD_NULL; }
+    if (th_net != LWP_THREAD_NULL) { LWP_JoinThread(th_net, NULL); th_net = LWP_THREAD_NULL; }
+    voice_reset();
+    sq_clear();
+    while (vq_r != vq_w) { av_packet_free(&vq[vq_r]); vq_r = (vq_r + 1) % VQ_MAX; }
+    vq_r = vq_w = 0; vq_needkey = 0; vq_bytes = 0; reopen_req = 0;
+    if (vpar) avcodec_parameters_free(&vpar);
+    for (i = 0; i < NPIC; i++) pic_state[i] = P_FREE;
+    cur_pic = -1; anchor_ok = 0;
+    net_eof = 0; playlist_complete = 0;
+    has_audio = has_video = 0; stream_w = stream_h = 0;
+    fps_val = 0; fps_cnt = 0; fps_t = 0;
+}
+/* rc11: vigilante del video (como KickWii): sin cuadro nuevo en 10 s con el directo "en vivo"
+   (audio sonando) -> se reabre el directo sin bloquear la pantalla. */
+static int wd_phase = 0, n_restart = 0; static u64 wd_t = 0, last_show_t = 0;
+static void wd_tick(void) {
+    u64 now = gettime();
+    if (wd_phase == 1) {
+        if (!(net_done && dmx_done && vid_done)) {
+            if (ticks_to_millisecs(now - wd_t) > 4000 && th_net != LWP_THREAD_NULL && !net_done) { guard_kill_socks(th_net); wd_t = now - (u64)secs_to_ticks(2); }
+            return;
+        }
+        join_and_clean();
+        abort_req = 0; perr[0] = 0; pstate = TP_CONNECTING; wd_phase = 0;
+        last_show_t = gettime();
+        if (!start_threads()) { snprintf(perr, sizeof(perr), "No se pudieron crear los hilos."); pstate = TP_ERROR; }
+        return;
+    }
+    if (pstate != TP_PLAYING || vod_mode || !has_video || cur_vmode == VM_AUDIO) { last_show_t = now; return; }
+    if (ticks_to_millisecs(now - last_show_t) > 10000) {
+        n_restart++;
+        dlog("VIGILANTE video: sin cuadros nuevos hace 10 s (decod %d mostrados %d); reabro el directo (#%d)", nframes, nshown, n_restart);
+        snprintf(pstatus, sizeof(pstatus), "Reconectando... (video congelado)");
+        abort_req = 1; wd_phase = 1; wd_t = now; pstate = TP_CONNECTING;
+    }
+}
+/* llamado por guard.c desde su hilo: 1 bajar prioridades, 0 restaurar, 3 cortar sockets */
+void tp_guard(int level) {
+    static int low = 0;
+    if (level >= 1 && !low) {
+        low = 1;
+        if (th_net != LWP_THREAD_NULL && !net_done) LWP_SetThreadPriority(th_net, 44);
+        if (th_dmx != LWP_THREAD_NULL && !dmx_done) LWP_SetThreadPriority(th_dmx, 42);
+        if (th_vid != LWP_THREAD_NULL && !vid_done) LWP_SetThreadPriority(th_vid, 36);
+    } else if (level == 0 && low) {
+        low = 0;
+        if (th_net != LWP_THREAD_NULL && !net_done) LWP_SetThreadPriority(th_net, 72);
+        if (th_dmx != LWP_THREAD_NULL && !dmx_done) LWP_SetThreadPriority(th_dmx, 70);
+        if (th_vid != LWP_THREAD_NULL && !vid_done) LWP_SetThreadPriority(th_vid, 40);
+    }
+    if (level >= 3 && th_net != LWP_THREAD_NULL && !net_done) guard_kill_socks(th_net);
+}
+void tp_guard_info(char *o, int n) {
+    snprintf(o, n, "video: estado %d fase %d hilos red%d/demux%d/video%d | decod %d mostrados %d | colas seg %d vq %d audio %d blq%s | red %lld KB",
+             pstate, wd_phase, !net_done, !dmx_done, !vid_done, nframes, nshown, sq_count, vq_count(), full_blocks(), starved ? " SIN AUDIO" : "", net_bytes >> 10);
+}
+
 /* ================================================================== hilo principal */
 const tv_pic_t *tp_picture(void) {
     int i, valid = 0, best = -1, minp = -1;
     double clock = tp_clock(&valid);
-    last_pic_call = gettime();
+    u64 now0 = gettime();
+    if (last_pic_call && ticks_to_millisecs(now0 - last_pic_call) > 1000) last_show_t = now0;   /* volvemos de un menu */
+    last_pic_call = now0;
     if (pstate == TP_IDLE) return NULL;
+    wd_tick();
     for (i = 0; i < NPIC; i++) {
         if (pic_state[i] != P_READY) continue;
         if (minp < 0 || pics[i].pts < pics[minp].pts) minp = i;
@@ -885,6 +974,7 @@ const tv_pic_t *tp_picture(void) {
         pic_state[best] = P_CUR;
         cur_pic = best;
         nshown++; fps_cnt++;
+        last_show_t = now0;
     }
     u64 now = gettime();
     if (!fps_t) fps_t = now;
@@ -893,21 +983,11 @@ const tv_pic_t *tp_picture(void) {
 }
 
 void tp_stop(void) {
-    int i;
     abort_req = 1;
-    if (th_vid != LWP_THREAD_NULL) { LWP_JoinThread(th_vid, NULL); th_vid = LWP_THREAD_NULL; }
-    if (th_dmx != LWP_THREAD_NULL) { LWP_JoinThread(th_dmx, NULL); th_dmx = LWP_THREAD_NULL; }
-    if (th_net != LWP_THREAD_NULL) { LWP_JoinThread(th_net, NULL); th_net = LWP_THREAD_NULL; }
-    voice_reset();
-    sq_clear();
-    while (vq_r != vq_w) { av_packet_free(&vq[vq_r]); vq_r = (vq_r + 1) % VQ_MAX; }
-    vq_r = vq_w = 0; vq_needkey = 0; vq_bytes = 0; reopen_req = 0;
-    if (vpar) avcodec_parameters_free(&vpar);
-    for (i = 0; i < NPIC; i++) pic_state[i] = P_FREE;
-    cur_pic = -1; anchor_ok = 0;
-    pstate = TP_IDLE; net_eof = 0;playlist_complete=0; abort_req = 0;
-    has_audio = has_video = 0; stream_w = stream_h = 0;
-    nframes = ndropped = nshown = 0; fps_val = 0; fps_cnt = 0; fps_t = 0;
+    wait_threads(8000);
+    join_and_clean();
+    pstate = TP_IDLE; abort_req = 0; wd_phase = 0; n_restart = 0;
+    nframes = ndropped = nshown = 0;
     net_bytes = 0; variant_info[0] = 0; pstatus[0] = 0;
 }
 
@@ -924,9 +1004,8 @@ int tp_play(const char *url, int vmode) {
     snprintf(purl, sizeof(purl), "%s", url);
     pstate = TP_CONNECTING;
     if (!sh_net_ready()) { snprintf(perr, sizeof(perr), "La red no esta disponible."); pstate = TP_ERROR; return 0; }
-    if (LWP_CreateThread(&th_net, net_thread, NULL, NULL, 128 * 1024, 72) < 0 ||
-        LWP_CreateThread(&th_dmx, dmx_thread, NULL, NULL, 256 * 1024, 70) < 0 ||
-        LWP_CreateThread(&th_vid, vid_thread, NULL, NULL, 256 * 1024, 40) < 0) {
+    last_show_t = gettime();
+    if (!start_threads()) {
         snprintf(perr, sizeof(perr), "No se pudieron crear los hilos."); pstate = TP_ERROR; return 0;
     }
     return 1;

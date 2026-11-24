@@ -15,13 +15,15 @@
 #include <ogc/lwp_watchdog.h>
 #include <curl/curl.h>
 #include "tv.h"
+#include "guard.h"
+#include "dlog.h"
 
 #define NMSG 24
 static tchat_t ring[NMSG];
 static int head = 0, count = 0;
 static volatile int gen = 0, run = 0;
 static char login[48];
-static char authpass[2048],authnick[64],outgoing[351];
+static char authpass[2048],authnick[64],outgoing[351],outgoing_tag[600];
 static volatile int authenticated,write_ready;static int rejected;static u64 last_send;
 static char status[96] = "";
 static mutex_t mtx;
@@ -127,20 +129,40 @@ static void *chat_thread(void *a) {
     return NULL;
 }
 
+/* rc11: el hilo principal nunca espera sin limite al hilo del chat (ver guard.c). A los 1,5 s se le
+ * cortan los sockets; a los 4 s se lo abandona (zombi) y el chat nuevo arranca cuando termine. */
+static volatile int th_done = 1; static lwp_t th_zombie = LWP_THREAD_NULL;
+static int pending_start; static char pending_who[48];
+static void *(*th_body)(void *);
+static void *th_wrap(void *a) { th_body(a); th_done = 1; return NULL; }
+static int reap(void) { if (th_zombie == LWP_THREAD_NULL) return 1; if (!th_done) return 0; LWP_JoinThread(th_zombie, NULL); th_zombie = LWP_THREAD_NULL; dlog("chat: el hilo abandonado termino"); return 1; }
 void chat_stop(void) {
-    if (th != LWP_THREAD_NULL) { run = 0; LWP_JoinThread(th, NULL); th = LWP_THREAD_NULL; }
+    pending_start = 0;
+    if (th != LWP_THREAD_NULL) {
+        run = 0; u64 t0 = gettime(); int killed = 0; guard_where("chat_stop");
+        while (!th_done) {
+            u32 ms = ticks_to_millisecs(gettime() - t0);
+            if (ms > 1500 && !killed) { killed = 1; int n = guard_kill_socks(th); dlog("chat: el hilo no termina en 1,5 s; corto %d socket(s)", n); }
+            if (ms > 4000) { dlog("chat: hilo trabado; no se lo espera (zombi)"); th_zombie = th; break; }
+            guard_beat(); usleep(10000);
+        }
+        if (th_zombie != th) LWP_JoinThread(th, NULL);
+        th = LWP_THREAD_NULL;
+    }
     write_ready=0;outgoing[0]=0;rejected=0;memset(authpass,0,sizeof(authpass));authenticated=0;
 }
 
 void chat_start(const char *who) {
     chat_stop();
     if (!mtx_ok) { LWP_MutexInit(&mtx, false); mtx_ok = 1; }
+    if (!reap()) { snprintf(pending_who, sizeof(pending_who), "%s", who); pending_start = 1; snprintf(status, sizeof(status), "Chat: cerrando la conexion anterior..."); return; }
     LWP_MutexLock(mtx); head = count = 0; gen++; LWP_MutexUnlock(mtx);
     snprintf(login, sizeof(login), "%s", who);
     authenticated=auth_irc_snapshot(authpass,sizeof(authpass),authnick,sizeof(authnick));
     snprintf(status, sizeof(status), "conectando...");
     run = 1;
-    if (LWP_CreateThread(&th, k_server[0] && !authenticated ? chat_thread : direct_thread, NULL, NULL, 160 * 1024, 44) < 0) { th = LWP_THREAD_NULL; run = 0; }
+    th_body = k_server[0] && !authenticated ? chat_thread : direct_thread; th_done = 0;
+    if (LWP_CreateThread(&th, th_wrap, NULL, NULL, 160 * 1024, 44) < 0) { th = LWP_THREAD_NULL; run = 0; th_done = 1; }
 }
 
 int chat_gen(void) { return gen; }
@@ -148,6 +170,7 @@ const char *chat_status(void) { return status; }
 
 int chat_get(tchat_t *out, int max) {
     int i, n;
+    if (pending_start && th_done && th == LWP_THREAD_NULL) { char w[48]; snprintf(w, sizeof w, "%s", pending_who); pending_start = 0; chat_start(w); }
     if (!mtx_ok) return 0;
     LWP_MutexLock(mtx);
     n = count < max ? count : max;
@@ -157,15 +180,19 @@ int chat_get(tchat_t *out, int max) {
 }
 
 /* The UI only enqueues; the IRC worker is the sole socket owner/writer. */
-int chat_send_text(const char *text) {
+/* rc11: tag = rangos de emotes calculados en la Wii (formato del tag IRC "emotes").
+ * Twitch no devuelve por IRC el mensaje propio, asi que el eco local se dibuja con esto. */
+int chat_send_text_e(const char *text, const char *tag) {
  if(!mtx_ok||!auth_message_valid(text))return 0;
 #ifdef SEND_DRYRUN
  /* rc8 PRUEBA: no se envia nada; se guarda la linea IRC que se mandaria */
- {FILE*f=fopen("sd:/twitchwii-test/dryrun-payload.txt","a");if(f){fprintf(f,"PRIVMSG #%s :%s\n",login,text);fclose(f);}push("Sistema","PRUEBA: no enviado (payload guardado en la SD)",0,1);return 1;}
+ {FILE*f=fopen("sd:/twitchwii-test/dryrun-payload.txt","a");if(f){fprintf(f,"PRIVMSG #%s :%s\n",login,text);fclose(f);}push_e(authnick[0]?authnick:"yo",text,C_ACCENT,0,tag);return 1;}
 #endif
  LWP_MutexLock(mtx);int ok=run&&authenticated&&write_ready&&!outgoing[0]&&(!last_send||ticks_to_millisecs(gettime()-last_send)>=2000);
- if(ok){snprintf(outgoing,sizeof(outgoing),"%s",text);last_send=gettime();}LWP_MutexUnlock(mtx);return ok;
+ if(ok){snprintf(outgoing,sizeof(outgoing),"%s",text);snprintf(outgoing_tag,sizeof(outgoing_tag),"%s",tag?tag:"");last_send=gettime();}LWP_MutexUnlock(mtx);return ok;
 }
+int chat_send_text(const char *text) { return chat_send_text_e(text, NULL); }
+void chat_local_echo_e(const char *name,const char *text,const char *tag){if(mtx_ok)push_e(name,text,C_ACCENT,0,tag);}
 void chat_local_echo(const char *name,const char *text){if(mtx_ok)push(name,text,C_ACCENT,0);}
 
 int chat_auth_rejected(void){if(!mtx_ok)return 0;LWP_MutexLock(mtx);int r=rejected;LWP_MutexUnlock(mtx);return r;}

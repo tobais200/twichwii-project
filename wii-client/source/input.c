@@ -8,6 +8,7 @@
 #include <wiikeyboard/keyboard.h>
 #include <ogc/lwp.h>
 #include "tv.h"
+#include "guard.h"
 
 static int kb_ok = 0;
 static int keyq[64], kq_head = 0, kq_tail = 0;
@@ -69,6 +70,7 @@ static lwp_t input_owner = LWP_THREAD_NULL;
 u32 in_poll(void) {
     if (input_owner == LWP_THREAD_NULL) input_owner = LWP_GetSelf();
     if (LWP_GetSelf() != input_owner) return 0;
+    guard_beat();
     u32 d, held;
     u64 now;
     WPAD_ScanPads();

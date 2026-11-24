@@ -107,6 +107,30 @@ static int kb_preview(const char*buf,int x,int y,int w){
   i=j;}
  if(!m.ne)return -1;
  return emote_preview_draw(&m,x,y,w);}
+/* rc11: arma el tag "emotes" (indices en caracteres, como IRC) para el propio mensaje,
+ * buscando cada palabra en los emotes conocidos (canal, globales, vistos en el chat). */
+int kb_emote_tag(const char *text, char *tag, int cap){
+ int q=0,len=strlen(text),ci=0,i=0,ne=0;tag[0]=0;
+ tw_seen();
+ while(i<len&&ne<8){
+  while(i<len&&text[i]==' '){i++;ci++;}
+  int j=i,cs=ci;
+  while(j<len&&text[j]!=' '){unsigned char c=text[j];j+=c<0x80?1:(c&0xE0)==0xC0?2:(c&0xF0)==0xE0?3:4;ci++;}
+  if(j>len)j=len;
+  if(j>i&&j-i<40)for(int k=0;k<tw_n;k++)if((int)strlen(tw_em[k].name)==j-i&&!strncmp(tw_em[k].name,text+i,j-i)){
+   int w=snprintf(tag+q,cap-q,"%s%s:%d-%d",q?"/":"",tw_em[k].id,cs,ci-1);if(w<0||w>=cap-q){tag[q]=0;return ne;}q+=w;ne++;break;}
+  i=j;}
+ return ne;}
+#ifdef AUTOTEST_OWNEMOTE
+/* rc11 prueba: el mismo camino que un envio real (tag calculado + eco local), sin mandar nada a Twitch */
+void auth_test_own_echo(const char*channel,const char*text){
+ static char etag[600];kb_chan_tw=channel;if(!tw_n||strcmp(tw_chan,kb_chan_tw))tw_load(kb_chan_tw);
+ int ne=kb_emote_tag(text,etag,sizeof(etag));
+ chat_local_echo("rc10_antes",text);            /* como quedaba antes: sin tag -> solo texto */
+ chat_local_echo_e("rc11_ahora",text,etag);     /* ahora: con los rangos de los emotes */
+ FILE*f=fopen("sd:/twitchwii-test/autotest.log","a");if(f){fprintf(f,"OWNEMOTE: %d emotes conocidos, texto='%s' tag='%s' (%d)\n",tw_n,text,etag,ne);fclose(f);}
+}
+#endif
 void auth_compose(const char *channel,unsigned long broadcaster){
  if(!auth_ready()){ui_toast("Primero inicia sesion en Ajustes");return;}
  char text[351]="",hint[192];snprintf(hint,sizeof(hint),"Cuenta: %s / #%s. Enviar publica el mensaje. Max. 350 bytes.",auth_login(),channel);
@@ -122,7 +146,8 @@ void auth_compose(const char *channel,unsigned long broadcaster){
  if(!ok)return;{size_t n=strlen(text);while(n&&text[n-1]==' ')text[--n]=0;}   /* rc8: sin el espacio final del selector */
  if(!auth_message_valid(text)){ui_toast("Mensaje vacio, muy largo o con caracteres de control. No enviado.");return;}
 #ifdef WII_TWITCH_AUTH
- if(!chat_send_text(text))ui_toast("No enviado: chat conectando, ocupado o limite de frecuencia.");else ui_toast("En cola IRC. Un aviso del servidor puede rechazarlo.");
+ static char etag[600];if(!tw_n||strcmp(tw_chan,kb_chan_tw))tw_load(kb_chan_tw);kb_emote_tag(text,etag,sizeof(etag));
+ if(!chat_send_text_e(text,etag))ui_toast("No enviado: chat conectando, ocupado o limite de frecuencia.");else ui_toast("En cola IRC. Un aviso del servidor puede rechazarlo.");
 #else
  if(auth_kick_send(broadcaster,text)){chat_local_echo(auth_login(),text);ui_toast("Kick acepto el mensaje");}else ui_toast(auth_status());
 #endif

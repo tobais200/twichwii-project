@@ -2,7 +2,7 @@
 <app version="1">
   <name>TwitchWii</name>
   <coder>fans (no oficial)</coder>
-  <version>1.2-rc10</version>
+  <version>1.2-rc11</version>
   <release_date>20261123</release_date>
   <short_description>Cliente NO oficial de Twitch para Wii</short_description>
   <long_description>Mira directos y videos de Twitch en tu Wii: inicio con canales en vivo, explorar categorias, buscar, pagina de canal, VODs y chat de solo lectura.

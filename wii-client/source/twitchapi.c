@@ -404,43 +404,52 @@ static void fill_cat_helix(tcat_t *c, const char *nd) {
     style_cat(c);
 }
 
+/* rc11: Helix games/top y search/categories no traen espectadores (solo id/nombre/box art).
+ * Se completa slug + viewersCount con el GQL publico, en tandas de 25 ids por consulta.
+ * Sin esto cada categoria mostraba "0 espectadores" con la sesion iniciada. */
 static void fill_missing_slugs(tcat_t *v, int from, int n, char *err, int esz) {
-    char body[4096];
-    int i, m = 0, pos;
-    sh_resp_t r;
-    const char *d;
-    pos = snprintf(body, sizeof(body), "{\"query\":\"query{");
-    for (i = 0; i < n && pos < (int)sizeof(body) - 80; i++) {
-        tcat_t *c = &v[from + i];
-        if (c->slug[0] || !c->id[0]) continue;
-        pos += snprintf(body + pos, sizeof(body) - pos, "g%d:game(id:\\\"%s\\\"){id slug} ", m, c->id);
-        m++;
-    }
-    if (!m) return;
-    if (pos >= (int)sizeof(body) - 8) { sh_resp_free(&r); return; }
-    snprintf(body + pos, sizeof(body) - pos, "}\"}");
-    memset(&r, 0, sizeof(r));
-    d = gql(body, &r, err, esz);
-    if (d) {
-        for (i = 0; i < n; i++) {
-            tcat_t *c = &v[from + i];
-            char key[16], got[20];
+    char body[2400];
+    int base;
+    char e2[96];
+    for (base = 0; base < n; base += 25) {
+        int i, m = 0, pos, cnt = n - base < 25 ? n - base : 25;
+        int idx[25];
+        sh_resp_t r;
+        const char *d;
+        pos = snprintf(body, sizeof(body), "{\"query\":\"query{");
+        for (i = 0; i < cnt && pos < (int)sizeof(body) - 90; i++) {
+            tcat_t *c = &v[from + base + i];
+            if (!c->id[0]) continue;
+            pos += snprintf(body + pos, sizeof(body) - pos, "g%d:game(id:\\\"%s\\\"){id slug viewersCount} ", m, c->id);
+            idx[m++] = from + base + i;
+        }
+        if (!m || pos >= (int)sizeof(body) - 8) continue;
+        snprintf(body + pos, sizeof(body) - pos, "}\"}");
+        memset(&r, 0, sizeof(r));
+        d = gql(body, &r, e2, sizeof(e2));
+        if (d) {
             int k;
-            if (c->slug[0] || !c->id[0]) continue;
             for (k = 0; k < m; k++) {
+                char key[16], got[20] = "";
                 const char *nd;
+                tcat_t *c = &v[idx[k]];
                 snprintf(key, sizeof(key), "g%d", k);
                 nd = jget(d, key);
-                if (!nd) continue;
-                got[0] = 0;
+                if (!nd || jis_null(nd)) continue;
                 jcopy(nd, "id", got, sizeof(got));
-                if (!strcmp(got, c->id)) { jcopy(nd, "slug", c->slug, sizeof(c->slug)); break; }
+                if (strcmp(got, c->id)) continue;
+                if (!c->slug[0]) jcopy(nd, "slug", c->slug, sizeof(c->slug));
+                c->viewers = (int)jnum(jget(nd, "viewersCount"));
             }
         }
+        sh_resp_free(&r);
     }
-    sh_resp_free(&r);
+    (void)err; (void)esz;
 }
 
+#ifdef AUTOTEST_CATS_HELIX
+#include "helix_canned.inc"
+#endif
 #define CAT_PAGE 100
 #define CAT_MAX  2000
 static int cats_started, cats_helix, cats_seed;
@@ -495,6 +504,12 @@ static int append_helix_top(tcatlist_t *out, int *more, char *err, int esz) {
              CAT_PAGE, ea ? "&after=" : "", ea ? ea : "");
     free(ea);
     memset(&r, 0, sizeof(r));
+#ifdef AUTOTEST_CATS_HELIX
+    /* prueba: la respuesta de Helix /games/top (forma real, sin espectadores) sin token */
+    if (cats_cursor[0]) { *more = 0; return 0; }
+    r.data = sh_strdup(helix_canned); r.code = 200; r.len = strlen(r.data);
+    if (0)
+#endif
     if (!helix_games(url, &r, err, esz)) { sh_resp_free(&r); return -1; }
     d = jws(r.data);
     arr = jget(d, "data");
@@ -585,7 +600,11 @@ int tw_categories_page(tcatlist_t *out, int *more, char *err, int esz) {
         cats_cursor[0] = 0;
         cats_seed = 0;
         cats_helix = 0;
+#ifdef AUTOTEST_CATS_HELIX
+        if (1) {
+#else
         if (auth_ready() && auth_access_token()[0]) {
+#endif
             n = append_helix_top(out, more, err, esz);
             if (n >= 0) { cats_helix = 1; return n; }
             /* Fall back to anonymous GQL if Helix is rejected. */

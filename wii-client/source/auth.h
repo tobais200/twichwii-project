@@ -28,6 +28,9 @@ long auth_follow_read(int endpoint,const char *query,char *out,size_t cap);
 void auth_screen(void);
 void auth_compose(const char *channel,unsigned long broadcaster);
 int chat_send_text(const char *text);
+int chat_send_text_e(const char *text, const char *tag);
+void chat_local_echo_e(const char *name,const char *text,const char *tag);
+int kb_emote_tag(const char *text, char *tag, int cap);
 
 void chat_local_echo(const char *name,const char *text);
 #ifdef AUTH_MOCK

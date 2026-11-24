@@ -13,6 +13,7 @@
 #include <wiiuse/wpad.h>
 #include <ogc/lwp.h>
 #include "tv.h"
+#include "guard.h"
 
 int ui_quit = 0;
 ui_frame_t UI;
@@ -164,6 +165,7 @@ void sui_busy_end(void) { busy_on = 0; thumbs_pause(0); }
 
 void ui_busy_tick(void) {
     if (LWP_GetSelf() != ui_owner) return;
+    guard_beat();
     if (!busy_on) return;
     if (ticks_to_millisecs(gettime() - busy_last) < 66) return;
     anim += 3;

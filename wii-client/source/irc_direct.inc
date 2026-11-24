@@ -74,16 +74,17 @@ static int irc_connect(void) {
     if (getaddrinfo("irc.chat.twitch.tv", "6667", &hints, &res)) return -1;
     int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0) { freeaddrinfo(res); return -1; }
+    guard_sock_add(fd);   /* rc11: el vigilante lo puede cortar */
     unsigned long nonblock = 1;
-    if (ioctl(fd, FIONBIO, &nonblock) < 0) { close(fd); freeaddrinfo(res); return -1; }
+    if (ioctl(fd, FIONBIO, &nonblock) < 0) { guard_sock_del(fd); close(fd); freeaddrinfo(res); return -1; }
     int rc = connect(fd, res->ai_addr, res->ai_addrlen); freeaddrinfo(res);
-    if (rc < 0 && errno != EINPROGRESS && errno != EWOULDBLOCK) { close(fd); return -1; }
+    if (rc < 0 && errno != EINPROGRESS && errno != EWOULDBLOCK) { guard_sock_del(fd); close(fd); return -1; }
     int i, ready = rc == 0;
     for (i = 0; !ready && run && i < 32; i++) {
         struct pollfd p = { fd, POLLOUT, 0 };
         if (poll(&p, 1, 250) > 0) { int error = 0; socklen_t n = sizeof(error); ready = !getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &n) && !error; break; }
     }
-    if (!ready || !run) { close(fd); return -1; }
+    if (!ready || !run) { guard_sock_del(fd); close(fd); return -1; }
     return fd;
 }
 static void *direct_thread(void *unused) {
@@ -126,11 +127,11 @@ static void *direct_thread(void *unused) {
     }}else usleep(20000);
     LWP_MutexLock(mtx);write_ready=run&&authenticated&&c.welcomed;LWP_MutexUnlock(mtx);
     if(write_ready) {
-     char text[351]="",command[440];LWP_MutexLock(mtx);if(outgoing[0]){snprintf(text,sizeof(text),"%s",outgoing);outgoing[0]=0;}LWP_MutexUnlock(mtx);
+     char text[351]="",command[440];static char etag[600];etag[0]=0;LWP_MutexLock(mtx);if(outgoing[0]){snprintf(text,sizeof(text),"%s",outgoing);snprintf(etag,sizeof(etag),"%s",outgoing_tag);outgoing[0]=0;outgoing_tag[0]=0;}LWP_MutexUnlock(mtx);
      if(text[0]){snprintf(command,sizeof(command),"PRIVMSG #%s :%s\r\n",login,text);
       /* Clear before I/O: an uncertain/disconnected send is NEVER replayed. */
       if(!irc_send(&c,command)){push("Sistema","Envio incierto: no se reintentara automaticamente",0,1);alive=0;}
-      else {push(authnick,text,C_ACCENT,0);snprintf(status,sizeof(status),"Mensaje enviado a IRC (sujeto a moderacion)");}
+      else {push_e(authnick,text,C_ACCENT,0,etag);snprintf(status,sizeof(status),"Mensaje enviado a IRC (sujeto a moderacion)");}
       memset(text,0,sizeof(text));memset(command,0,sizeof(command));
      }
     }
@@ -140,7 +141,7 @@ static void *direct_thread(void *unused) {
    }
    LWP_MutexLock(mtx);write_ready=0;int dropped=outgoing[0]!=0;outgoing[0]=0;LWP_MutexUnlock(mtx);
    if(dropped)push("Sistema","Chat desconectado: mensaje descartado; no se reenvia",0,1);
-   if(c.fd>=0)close(c.fd);
+   if(c.fd>=0){guard_sock_del(c.fd);close(c.fd);}
    cn_close(net);
   }
   if(!run)break;
