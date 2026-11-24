@@ -14,3 +14,6 @@ build/
 *.dol
 *.wad
 *.zip
+
+# Public CA certificate bundle (needed for HTTPS, not a secret)
+!wii-client/data/cacert.pem
