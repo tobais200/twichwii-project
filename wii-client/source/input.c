@@ -7,6 +7,7 @@
 #include <wiiuse/wpad.h>
 #include <wiikeyboard/keyboard.h>
 #include <ogc/lwp.h>
+#include <math.h>
 #include "tv.h"
 #include "guard.h"
 
@@ -99,6 +100,12 @@ u32 in_poll(void) {
         in_ptr.valid = wd->ir.x >= 0 && wd->ir.x < FB_W; in_ptr.idle = 0;
     } else {
         int sx = PAD_StickX(0), sy = PAD_StickY(0);
+        /* Classic left stick: same virtual pointer as the GameCube stick (0 deg = up, 90 = right). */
+        if (wd && wd->exp.type == WPAD_EXP_CLASSIC && wd->exp.classic.ljs.mag > 0.15f) {
+            float a = wd->exp.classic.ljs.ang * (3.14159265f / 180.f);
+            sx = (int)(wd->exp.classic.ljs.mag * sinf(a) * 128.f);
+            sy = (int)(wd->exp.classic.ljs.mag * cosf(a) * 128.f);
+        }
         if (sx * sx + sy * sy > 20 * 20) {
             vx += sx * 0.09f * dt; vy -= sy * 0.09f * dt;
             in_ptr.valid = 1; in_ptr.idle = 0;

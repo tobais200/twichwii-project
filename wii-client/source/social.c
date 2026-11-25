@@ -54,7 +54,7 @@ int social_toggle_favorite(const char*slug){char n[48];if(!canonical(slug,n,size
  FILE*f=fopen(TV_CFG_DIR "favoritos.txt.tmp","wb");int ok=f!=NULL;if(f){for(int i=0;i<nfavs;i++)if(fprintf(f,"%s\n",favorites[i])<0)ok=0;if(fclose(f))ok=0;}
  if(ok){remove(TV_CFG_DIR "favoritos.txt.bak");int had=rename(TV_CFG_DIR "favoritos.txt",TV_CFG_DIR "favoritos.txt.bak")==0;if(rename(TV_CFG_DIR "favoritos.txt.tmp",TV_CFG_DIR "favoritos.txt")){if(had)rename(TV_CFG_DIR "favoritos.txt.bak",TV_CFG_DIR "favoritos.txt");ok=0;}else remove(TV_CFG_DIR "favoritos.txt.bak");}
  if(!ok){nfavs=old;memcpy(favorites,backup,sizeof(backup));remove(TV_CFG_DIR "favoritos.txt.tmp");snprintf(status_text,sizeof(status_text),"No se guardo el favorito: revisa la SD");return 0;}
- snprintf(status_text,sizeof(status_text),"Favorito SD actualizado. NO cambia tu cuenta Kick.");return 1;
+ snprintf(status_text,sizeof(status_text),"Favorito SD actualizado. NO cambia tu cuenta Twitch.");return 1;
 }
 #else
 static char cached_slug[48],cached_login[64];static int followed=-1;static time_t last_query;
@@ -95,7 +95,7 @@ void social_screen(const char*slug,int sub){char url[160];if(!social_url(slug,su
  wrap(282+OX,252,sub?"No se comprueba ni se confirma una compra desde la Wii.":"Volver / Actualizar consulta el estado real. Si falta permiso, autoriza otra vez en Ajustes.",300,C_DIM);
  if(!sub&&ui_button(42+OX,366,270,30,"Actualizar estado",IC_NEXT,BS_NORMAL,0))social_refresh(slug);
 #else
- wrap(282+OX,252,"Kick no publica tu estado de seguimiento. Favorito SD es solo un marcador local.",300,C_DIM);
+ wrap(282+OX,252,"Twitch no publica tu estado de seguimiento. Favorito SD es solo un marcador local.",300,C_DIM);
  if(!sub&&ui_button(42+OX,366,270,30,social_favorite(slug)?"Quitar favorito SD":"Guardar favorito SD",IC_HEART,BS_ACCENT,0))social_toggle_favorite(slug);
 #endif
  gfx_text_fit(&font_small,38+OX,338,url,C_LINK,564);gfx_text_fit(&font_small,38+OX,405,sub?"No hay cobros desde esta app.":status_text,C_DIM,560);int back=ui_button(430+OX,420,168,30,"Volver",IC_BACK,BS_NORMAL,0);ui_present();if(back)break;}
@@ -114,7 +114,7 @@ int social_home(char*out,size_t cap){if(!out||!cap)return 0;out[0]=0;thumbs_paus
  const char*v=jpath(json,"pagination.cursor");if(v)jstr(v,next,sizeof(next));int more=next[0]&&strcmp(next,cursor);if(more)snprintf(labels[n++],180,"Pagina siguiente");free(json);for(int i=0;i<n;i++)items[i]=labels[i];int sel=0;
  u32 r=sui_list("Seguidos en vivo",count?"Helix oficial - A: abrir canal / B: volver":"Nadie en vivo en esta pagina - B: volver",items,n,&sel);if(r!=WPAD_BUTTON_A)return 0;if(sel==0){cursor[0]=0;continue;}if(more&&sel==n-1){snprintf(cursor,sizeof(cursor),"%s",next);continue;}if(sel>0&&sel<=count){snprintf(out,cap,"%s",slugs[sel-1]);return 1;}}
 #else
- favorites_load();if(!nfavs){sui_text_view("Favoritos SD", "B: volver","Todavia no hay favoritos locales. Abri un canal > corazon Seguir > Guardar favorito SD. NO sigue al canal en tu cuenta Kick.");return 0;}char*items[64];for(int i=0;i<nfavs;i++)items[i]=favorites[i];int sel=0;u32 r=sui_list("Favoritos SD (no son follows)","A: abrir canal / B: volver - locales a esta SD",items,nfavs,&sel);if(r==WPAD_BUTTON_A&&sel>=0&&sel<nfavs){snprintf(out,cap,"%s",favorites[sel]);return 1;}return 0;
+ favorites_load();if(!nfavs){sui_text_view("Favoritos SD", "B: volver","Todavia no hay favoritos locales. Abri un canal > corazon Seguir > Guardar favorito SD. NO sigue al canal en tu cuenta Twitch.");return 0;}char*items[64];for(int i=0;i<nfavs;i++)items[i]=favorites[i];int sel=0;u32 r=sui_list("Favoritos SD (no son follows)","A: abrir canal / B: volver - locales a esta SD",items,nfavs,&sel);if(r==WPAD_BUTTON_A&&sel>=0&&sel<nfavs){snprintf(out,cap,"%s",favorites[sel]);return 1;}return 0;
 #endif
 }
 #endif

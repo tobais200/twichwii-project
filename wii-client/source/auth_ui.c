@@ -36,8 +36,8 @@ void auth_screen(void){thumbs_pause(1);ui_set_backdrop(NULL);
   wrap(282+OX,150,"Escanea el QR, inicia sesion en Twitch y autoriza TwitchWii. Tambien podes abrir twitch.tv/activate y escribir este codigo.",300,C_TEXT);
   wrap(282+OX,260,"Conexion directa a Twitch. Permisos: chat y lectura de Seguidos.",300,C_DIM);
 #else
-  wrap(282+OX,150,"Escanea, inicia sesion en Kick y aproba. Al finalizar volve a la Wii: no copies URLs ni codigos.",300,C_TEXT);
-  wrap(282+OX,260,"El relay del desarrollador solo gestiona OAuth. El chat va directo a Kick.",300,C_DIM);
+  wrap(282+OX,150,"Escanea, inicia sesion en Twitch y aproba. Al finalizar volve a la Wii: no copies URLs ni codigos.",300,C_TEXT);
+  wrap(282+OX,260,"El relay del desarrollador solo gestiona OAuth. El chat va directo a Twitch.",300,C_DIM);
 #endif
   gfx_text_fit(&font_small,42+OX,310,auth_url(),C_DIM,556);
  }else{gfx_icon(IC_USER,150+OX,180,64,C_ACCENT);wrap(282+OX,145,"No se obtuvo un QR. Revisa Internet y pulsa Nuevo QR. Si sigue fallando, contacta al desarrollador.",300,C_TEXT);}
@@ -149,7 +149,7 @@ void auth_compose(const char *channel,unsigned long broadcaster){
  static char etag[600];if(!tw_n||strcmp(tw_chan,kb_chan_tw))tw_load(kb_chan_tw);kb_emote_tag(text,etag,sizeof(etag));
  if(!chat_send_text_e(text,etag))ui_toast("No enviado: chat conectando, ocupado o limite de frecuencia.");else ui_toast("En cola IRC. Un aviso del servidor puede rechazarlo.");
 #else
- if(auth_kick_send(broadcaster,text)){chat_local_echo(auth_login(),text);ui_toast("Kick acepto el mensaje");}else ui_toast(auth_status());
+ if(auth_kick_send(broadcaster,text)){chat_local_echo(auth_login(),text);ui_toast("Twitch acepto el mensaje");}else ui_toast(auth_status());
 #endif
  memset(text,0,sizeof(text));
 }
