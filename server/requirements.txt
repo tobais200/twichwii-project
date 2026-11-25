@@ -1,0 +1,3 @@
+# Todo es opcional: el servidor funciona solo con la biblioteca estandar de Python 3.8+.
+Pillow>=9        # miniaturas, avatares y box art para la Wii (muy recomendado)
+# ffmpeg (programa del sistema, no de pip): necesario para el modo "transcode", los VODs y los canales DEMO
