@@ -25,7 +25,7 @@ void auth_screen(void){thumbs_pause(1);ui_set_backdrop(NULL);
 #endif
  if(!auth_configured()){
   gfx_icon(IC_USER,150+OX,180,64,C_ACCENT);gfx_text_fit(&font_title,270+OX,105,"Sin configurar",C_WARN,326);
-  wrap(270+OX,150,"Version sin configurar por el desarrollador. El desarrollador debe completar LOGIN-RC4F.md y recompilar. No tenes que crear una app ni ingresar IDs.",315,C_TEXT);
+  wrap(270+OX,150,"Version sin configurar por el desarrollador. El desarrollador debe completar la configuracion de login y recompilar. No tenes que crear una app ni ingresar IDs.",315,C_TEXT);
   wrap(44+OX,290,"Este paquete de prueba tiene las constantes de publicacion vacias. No se puede inventar un QR de autorizacion valido.",550,C_DIM);
  }else if(auth_ready()){
   gfx_icon(IC_USER,150+OX,180,64,C_ACCENT);gfx_text_c(&font_small,150+OX,240,"Cuenta conectada",C_DIM);gfx_text_fit(&font_title,282+OX,104,auth_login(),C_ACCENT,310);
