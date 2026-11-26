@@ -14,6 +14,8 @@
 #include <ogc/lwp.h>
 #include "tv.h"
 #include "guard.h"
+#include "mem2.h"
+#define KB_MEM2_ALLOC twitchwii_mem2_alloc
 
 int ui_quit = 0;
 ui_frame_t UI;
@@ -203,13 +205,103 @@ static void kb_back(char *buf, int *len) {
     buf[*len] = 0;
 }
 
+/* ---- teclado en pantalla: capa estatica cacheada + redibujo de rectangulos sucios ----
+ * Antes cada cuadro volvia a dibujar el fondo completo (draw_home/etc.), la capa oscura, el panel,
+ * las 45 teclas y reconvertia los 640x480 px a YUYV con filtro bilineal (~50 ms por cuadro = 20 fps,
+ * 15 fps en 16:9). Ahora el fondo + panel + marco del campo + ayuda se dibujan UNA vez al abrir y se
+ * guardan en una copia (kb_snap). Despues, por cuadro solo se redibujan las teclas cuyo estado cambio
+ * (foco / puntero encima / apretada), el campo de texto al escribir o al parpadear el cursor, y la
+ * flecha del puntero; solo esas filas/columnas se reconvierten a YUYV (gfx_ui_*) y se copian al XFB.
+ * Si no cambia nada no se dibuja ni se presenta nada. Mismo aspecto, mismas teclas y entradas. */
+typedef struct { int x0, y0, x1, y1; } kb_rect_t;
+static u32 *kb_snap = NULL;
+static void kb_rect_add(kb_rect_t *L, int *n, int x0, int y0, int x1, int y1) {
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > SCR_W) x1 = SCR_W;
+    if (y1 > SCR_H) y1 = SCR_H;
+    if (x1 <= x0 || y1 <= y0) return;
+    if (*n >= 16) {   /* demasiados: una sola union */
+        for (int i = 1; i < *n; i++) { if (L[i].x0 < L[0].x0) L[0].x0 = L[i].x0; if (L[i].y0 < L[0].y0) L[0].y0 = L[i].y0; if (L[i].x1 > L[0].x1) L[0].x1 = L[i].x1; if (L[i].y1 > L[0].y1) L[0].y1 = L[i].y1; }
+        *n = 1;
+    }
+    L[*n].x0 = x0; L[*n].y0 = y0; L[*n].x1 = x1; L[*n].y1 = y1; (*n)++;
+}
+static int kb_isect(const kb_rect_t *a, int x0, int y0, int x1, int y1) { return a->x0 < x1 && x0 < a->x1 && a->y0 < y1 && y0 < a->y1; }
+static void kb_rects_merge(kb_rect_t *L, int *n) {
+    int again = 1;
+    while (again) {
+        again = 0;
+        for (int i = 0; i < *n && !again; i++) for (int j = i + 1; j < *n; j++) {
+            if (kb_isect(&L[i], L[j].x0, L[j].y0, L[j].x1, L[j].y1)) {
+                if (L[j].x0 < L[i].x0) L[i].x0 = L[j].x0;
+                if (L[j].y0 < L[i].y0) L[i].y0 = L[j].y0;
+                if (L[j].x1 > L[i].x1) L[i].x1 = L[j].x1;
+                if (L[j].y1 > L[i].y1) L[i].y1 = L[j].y1;
+                L[j] = L[--(*n)];
+                again = 1; break;
+            }
+        }
+    }
+}
+static void kb_restore(const kb_rect_t *R) {
+    for (int y = R->y0; y < R->y1; y++) memcpy(canvas + y * SCR_W + R->x0, kb_snap + y * SCR_W + R->x0, (R->x1 - R->x0) * sizeof(u32));
+}
+#define KB_CURSOR_RECT(L, n, x, y) kb_rect_add(L, n, (x) - 1, (y) - 1, (x) + 22, (y) + 30)
+
+#ifdef KBD_BENCH
+#include <stdarg.h>
+extern unsigned gfx_last_conv_us;
+static FILE *kbf = NULL;
+static void kbl(const char *fmt, ...) {
+    if (!kbf) kbf = fopen("sd:/kbd-bench.log", "w");
+    if (!kbf) return;
+    va_list ap; va_start(ap, fmt); vfprintf(kbf, fmt, ap); va_end(ap); fputc('\n', kbf); fflush(kbf);
+}
+#define KBT() ((unsigned)ticks_to_microsecs(gettime()))
+#endif
+
 int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,const char *accept,const char *placeholder) {
     int r = 1, c = 0, shift = 0, len = strlen(buf), done = -1, i, k;
     int px = (SCR_W-592)/2, py = 40, pw = 592, ph = 404;   /* rc14: 20 px mas: la ayuda ya no pisa la ultima fila */
-    wait_release();
+    static const char *sl[K_NSPECIAL] = { "Espacio", "Borrar", "Limpiar", "Mayus", "Cancelar", "Buscar", "Emotes" };
+    static const int sw0[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84, 0 };
+    static const int sw1[K_NSPECIAL] = { 68, 80, 72, 64, 80, 80, 74 };   /* con la tecla Emotes: mismo ancho total */
+    const int NK = KB_ROWS * 10 + K_NSPECIAL;
+    /* geometria fija del teclado */
+    int fx = px + 20, fy = py + 76, fw = pw - 40, fh = 44;
+    int kw = 50, kh = 42, gap = 6, kx0 = px + (pw - (10 * kw + 9 * gap)) / 2, ky0 = py + 136;
+    int spx[K_NSPECIAL] = { 0 };
+    {
+        int has0 = sui_kb_emote_hook != NULL, nsp0 = has0 ? K_NSPECIAL : K_EMOTE;
+        const int *sw = has0 ? sw1 : sw0;
+        int sx = kx0;
+        for (k = 0; k < nsp0; k++) { if (k == K_EMOTE) sx = kx0 + 10 * kw + 9 * gap - sw[k]; spx[k] = sx; sx += sw[k] + gap; }
+    }
+    int sy = ky0 + KB_ROWS * (kh + gap) + 4;
+    int need_full = 1, have_snap = 0;
+    unsigned char kst[KB_ROWS * 10 + K_NSPECIAL];
+    unsigned kb_hash = 0; int kb_phase = -1, pcx = -1000, pcy = -1000, pcv = 0, pshift = 0;
+    memset(kst, 0xFF, sizeof kst);
+#ifdef KBD_BENCH
+    unsigned kb_t_open = KBT(), kb_t_prev = kb_t_open, kb_frame = 0, kb_sum_draw[3] = {0}, kb_sum_pres[3] = {0}, kb_sum_conv[3] = {0}, kb_n[3] = {0}, kb_max[3] = {0}, kb_first = 0, kb_present_n[3] = {0}, kb_loop[3] = {0};
+    kbl("keyboard open (canvas %d)", SCR_W);
+#endif
+    if (!kb_snap) kb_snap = KB_MEM2_ALLOC((u32)(SCR_MAX_W * SCR_H * sizeof(u32)), 32);
+    in_poll();   /* descarta el flanco del boton que abrio el teclado (antes: 2 cuadros de espera = ~33 ms) */
     while (SYS_MainLoop() && done < 0) {
         u32 d = in_poll();
         int key;
+#ifdef KBD_BENCH
+        unsigned kb_t0 = KBT();
+        if (kb_frame == 90) in_set_ptr(100, 200, 1);
+        if (kb_frame > 90 && kb_frame < 100) in_set_ptr(100 + (kb_frame - 90) * 6, 200 + ((kb_frame / 7) % 4) * 48, 1);
+        if (kb_frame >= 100 && kb_frame < 140) in_set_ptr(spx[K_SHIFT] + 20, sy + 20, 1);
+        if (kb_frame == 104) in_inject_btn(WPAD_BUTTON_A);
+        if (kb_frame > 140 && kb_frame < 170) in_set_ptr(100 + (kb_frame - 90) * 6, 200 + ((kb_frame / 7) % 4) * 48, 1);
+        if (kb_frame >= 180 && kb_frame < 220 && kb_frame % 8 == 0) in_inject_key("hola mundo"[(kb_frame - 180) / 8 % 10]);
+        if (kb_frame == 240) in_inject_key(27);
+#endif
         ui_begin(d);
         while ((key = in_key()) != 0) {
             if (key == 13) done = 1;
@@ -221,6 +313,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
         if (d & WPAD_BUTTON_UP)    r = (r + KB_ROWS) % (KB_ROWS + 1);
         if (d & WPAD_BUTTON_DOWN)  r = (r + 1) % (KB_ROWS + 1);
         int has_emo = sui_kb_emote_hook != NULL, nsp = has_emo ? K_NSPECIAL : K_EMOTE;
+        const int *sw = has_emo ? sw1 : sw0;
         int cols = (r == KB_ROWS) ? nsp : 10;
         if (c >= cols) c = cols - 1;
         if (d & WPAD_BUTTON_LEFT)  c = (c + cols - 1) % cols;
@@ -230,51 +323,156 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
         if (d & WPAD_BUTTON_B)     kb_back(buf, &len);
         int fire = -1;   /* tecla activada por A (puntero o foco) */
 
-        ui_backdrop(170);
-        ui_panel(px, py, pw, ph, title);
-        if (hint) gfx_text_fit(&font_small, px + 22, py + 56, hint, C_DIM, pw - 44);
-        /* campo de texto */
-        int fx = px + 20, fy = py + 76, fw = pw - 40, fh = 44;
-        gfx_rrect(fx, fy, fw, fh, 10, 0x0B0B0E, 255);
-        gfx_rframe(fx, fy, fw, fh, 10, 2, C_ACCENT, 255);
-        gfx_icon(IC_SEARCH, fx + 22, fy + fh / 2, 18, C_DIM);
-        {
-            int cx = buf[0] && sui_kb_preview ? sui_kb_preview(buf, fx + 42, fy + 12, fw - 70) : -1;
-            if (cx < 0) {
-                const char *show = buf;
-                while (gfx_text_w(&font_title, show) > fw - 70 && *show) { const char *q = show; utf8_next(&q); show = q; }
-                cx = fx + 44 + gfx_text(&font_title, fx + 42, fy + 9, show, C_TEXT);
-            }
-            if (!buf[0]) gfx_text(&font_body, fx + 44, fy + 14, placeholder, C_FAINT);
-            if ((anim / 20) & 1) gfx_rect(cx, fy + 10, 2, 25, C_ACCENT);
-        }
-        /* teclas */
-        int kw = 50, kh = 42, gap = 6, kx0 = px + (pw - (10 * kw + 9 * gap)) / 2, ky0 = py + 136;
+        /* ---- logica de teclas: puntero encima -> foco; A sobre una tecla ---- */
         for (i = 0; i < KB_ROWS; i++) for (k = 0; k < 10; k++) {
-            unsigned char ch = kb_rows[i][k];
-            if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
-            char lab[4] = { 0 };
-            if (ch < 0x80) lab[0] = ch; else { lab[0] = 0xC0 | (ch >> 6); lab[1] = 0x80 | (ch & 0x3F); }
             int x = kx0 + k * (kw + gap), y = ky0 + i * (kh + gap);
-            int foc = (r == i && c == k) && !in_ptr.valid;
             if (ui_hover(x, y, kw, kh)) { r = i; c = k; }
-            if (ui_button(x, y, kw, kh, lab, 0, BS_NORMAL, foc || (r == i && c == k && in_ptr.valid))) fire = 1000 + ch;
+            if (ui_click(x, y, kw, kh)) {
+                unsigned char ch = kb_rows[i][k];
+                if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
+                fire = 1000 + ch;
+            }
         }
-        static const char *sl[K_NSPECIAL] = { "Espacio", "Borrar", "Limpiar", "Mayus", "Cancelar", "Buscar", "Emotes" };
-        static const int sw0[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84, 0 };
-        static const int sw1[K_NSPECIAL] = { 68, 80, 72, 64, 80, 80, 74 };   /* con la tecla Emotes: mismo ancho total */
-        const int *sw = has_emo ? sw1 : sw0;
-        int sx = kx0, sy = ky0 + KB_ROWS * (kh + gap) + 4;
         for (k = 0; k < nsp; k++) {
-            int st = k == K_OK ? BS_ACCENT : (k == K_SHIFT && shift ? BS_ACCENT : BS_NORMAL);
-            if (k == K_EMOTE) { sx = kx0 + 10 * kw + 9 * gap - sw[k]; }
-            int ic = k == K_OK ? IC_SEARCH : (k == K_BACK ? IC_BACK : 0);
-            if (ui_hover(sx, sy, sw[k], kh)) { r = KB_ROWS; c = k; }
-            if (ui_button(sx, sy, sw[k], kh, k==K_OK?accept:sl[k], ic, st, r == KB_ROWS && c == k)) fire = k;
-            sx += sw[k] + gap;
+            if (ui_hover(spx[k], sy, sw[k], kh)) { r = KB_ROWS; c = k; }
+            if (ui_click(spx[k], sy, sw[k], kh)) fire = k;
         }
-        gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, has_emo ? "A: tecla   B: borrar   +: aceptar   -: cancelar   2: emotes" : "A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)", C_FAINT);
-        ui_present();
+        /* si el puntero salio de una tecla, el foco queda donde estaba */
+
+#ifdef KBD_BENCH
+        unsigned kb_t1pre = KBT();
+#endif
+        /* ---- dibujo ---- */
+        int did_present = 0;
+        {
+            kb_rect_t L[18]; int nl = 0;
+            int phase = (int)((ticks_to_millisecs(gettime()) / 500) & 1);
+            unsigned h = 2166136261u; for (const unsigned char *q = (const unsigned char *)buf; *q; q++) h = (h ^ *q) * 16777619u;
+            int text_chg = h != kb_hash || phase != kb_phase;
+            int ptr_chg = in_ptr.valid != pcv || (in_ptr.valid && (in_ptr.x != pcx || in_ptr.y != pcy));
+            if (need_full) {
+                /* capa estatica: fondo + capa oscura + panel + titulo + ayuda + marco del campo */
+#ifdef KBD_BENCH
+                unsigned kq0 = KBT();
+#endif
+                ui_backdrop(170);
+#ifdef KBD_BENCH
+                unsigned kq1 = KBT();
+#endif
+                ui_panel(px, py, pw, ph, title);
+                if (hint) gfx_text_fit(&font_small, px + 22, py + 56, hint, C_DIM, pw - 44);
+                gfx_rrect(fx, fy, fw, fh, 10, 0x0B0B0E, 255);
+                gfx_rframe(fx, fy, fw, fh, 10, 2, C_ACCENT, 255);
+                gfx_icon(IC_SEARCH, fx + 22, fy + fh / 2, 18, C_DIM);
+                gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, has_emo ? "A: tecla   B: borrar   +: aceptar   -: cancelar   2: emotes" : "A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)", C_FAINT);
+                gfx_noclip();
+#ifdef KBD_BENCH
+                unsigned kq2 = KBT();
+#endif
+                if (kb_snap) { memcpy(kb_snap, canvas, SCR_W * SCR_H * sizeof(u32)); have_snap = 1; }
+#ifdef KBD_BENCH
+                kbl("full-layer: backdrop+dim %u us, panel+static %u us, snapshot memcpy %u us", kq1 - kq0, kq2 - kq1, KBT() - kq2);
+#endif
+                kb_rect_add(L, &nl, 0, 0, SCR_W, SCR_H);
+                memset(kst, 0xFF, sizeof kst);
+            } else if (have_snap) {
+                if (ptr_chg) { if (pcv) KB_CURSOR_RECT(L, &nl, pcx, pcy); if (in_ptr.valid) KB_CURSOR_RECT(L, &nl, in_ptr.x, in_ptr.y); }
+                if (text_chg) kb_rect_add(L, &nl, fx, fy, fx + fw, fy + fh);
+                if (shift != pshift) kb_rect_add(L, &nl, kx0 - 3, ky0 - 3, kx0 + 10 * kw + 9 * gap + 3, sy + kh + 4);   /* Mayus: cambian todas las letras */
+            }
+            /* estado de cada tecla: bit0 foco, bit1 puntero encima, bit2 apretada */
+            if (have_snap || !kb_snap) for (i = 0; i < NK; i++) {
+                int x, y, w;
+                if (i < KB_ROWS * 10) { x = kx0 + (i % 10) * (kw + gap); y = ky0 + (i / 10) * (kh + gap); w = kw; }
+                else { int kk = i - KB_ROWS * 10; if (kk >= nsp) { kst[i] = 0; continue; } x = spx[kk]; y = sy; w = sw[kk]; }
+                int foc = i < KB_ROWS * 10 ? (r == i / 10 && c == i % 10) : (r == KB_ROWS && c == i - KB_ROWS * 10);
+                int hov = ui_hover(x, y, w, kh);
+                unsigned char st = (foc ? 1 : 0) | (hov ? 2 : 0) | (hov && (in_ptr.held & WPAD_BUTTON_A) ? 4 : 0);
+                if (st != kst[i]) { kst[i] = st; if (!need_full && shift == pshift) kb_rect_add(L, &nl, x - 3, y - 3, x + w + 3, y + kh + 4); }
+            }
+            if (nl && !need_full && !ptr_chg && in_ptr.valid) KB_CURSOR_RECT(L, &nl, in_ptr.x, in_ptr.y);   /* la flecha se redibuja sobre un rectangulo restaurado */
+            if (nl) {
+                kb_rects_merge(L, &nl);
+                /* si algun rectangulo toca el campo, se repinta el campo completo (emote_preview_draw fija su propio recorte) */
+                { int grew = 0; for (int q = 0; q < nl; q++) if (kb_isect(&L[q], fx, fy, fx + fw, fy + fh)) { if (fx < L[q].x0) L[q].x0 = fx; if (fy < L[q].y0) L[q].y0 = fy; if (fx + fw > L[q].x1) L[q].x1 = fx + fw; if (fy + fh > L[q].y1) L[q].y1 = fy + fh; grew = 1; } if (grew) kb_rects_merge(L, &nl); }
+                for (int q = 0; q < nl; q++) {
+                    const kb_rect_t *R = &L[q];
+                    if (have_snap && !need_full) kb_restore(R);
+                    gfx_clip(R->x0, R->y0, R->x1 - R->x0, R->y1 - R->y0);
+                    /* contenido del campo */
+                    if (kb_isect(R, fx, fy, fx + fw, fy + fh)) {
+                        int cx = buf[0] && sui_kb_preview ? sui_kb_preview(buf, fx + 42, fy + 12, fw - 70) : -1;
+                        if (cx < 0) {
+                            const char *show = buf;
+                            while (gfx_text_w(&font_title, show) > fw - 70 && *show) { const char *qq = show; utf8_next(&qq); show = qq; }
+                            cx = fx + 44 + gfx_text(&font_title, fx + 42, fy + 9, show, C_TEXT);
+                        }
+                        gfx_clip(R->x0, R->y0, R->x1 - R->x0, R->y1 - R->y0);   /* la vista previa de emotes cambia el recorte */
+                        if (!buf[0]) gfx_text(&font_body, fx + 44, fy + 14, placeholder, C_FAINT);
+                        if (phase) gfx_rect(cx, fy + 10, 2, 25, C_ACCENT);
+                    }
+                    /* teclas que tocan el rectangulo */
+                    for (i = 0; i < NK; i++) {
+                        int x, y, w; const char *lab; char lb[4] = { 0 }; int ic = 0, st = BS_NORMAL, foc;
+                        if (i < KB_ROWS * 10) {
+                            int ri = i / 10, ci = i % 10;
+                            x = kx0 + ci * (kw + gap); y = ky0 + ri * (kh + gap); w = kw;
+                            if (!kb_isect(R, x - 3, y - 3, x + w + 3, y + kh + 4)) continue;
+                            unsigned char ch = kb_rows[ri][ci];
+                            if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
+                            if (ch < 0x80) lb[0] = ch; else { lb[0] = 0xC0 | (ch >> 6); lb[1] = 0x80 | (ch & 0x3F); }
+                            lab = lb; foc = (r == ri && c == ci);
+                        } else {
+                            int kk = i - KB_ROWS * 10;
+                            if (kk >= nsp) continue;
+                            x = spx[kk]; y = sy; w = sw[kk];
+                            if (!kb_isect(R, x - 3, y - 3, x + w + 3, y + kh + 4)) continue;
+                            st = kk == K_OK ? BS_ACCENT : (kk == K_SHIFT && shift ? BS_ACCENT : BS_NORMAL);
+                            ic = kk == K_OK ? IC_SEARCH : (kk == K_BACK ? IC_BACK : 0);
+                            lab = kk == K_OK ? accept : sl[kk]; foc = (r == KB_ROWS && c == kk);
+                        }
+                        { u32 sd = UI.down; UI.down = 0; ui_button(x, y, w, kh, lab, ic, st, foc); UI.down = sd; }
+                    }
+                }
+                gfx_noclip();
+                if (in_ptr.valid) ui_draw_cursor();
+                if (need_full) gfx_ui_cache_rows(0, SCR_H);
+                else { for (int q = 0; q < nl; q++) gfx_ui_mark_rect(L[q].x0, L[q].y0, L[q].x1, L[q].y1); gfx_ui_commit_rows(); }
+#ifdef KBD_BENCH
+                unsigned kb_t1 = KBT();
+#endif
+                gfx_composite(NULL, 0, 0, 0, 0, NULL);
+                did_present = 1;
+#ifdef KBD_BENCH
+                { unsigned kb_t2 = KBT(); int ph2 = kb_frame < 90 ? 0 : (kb_frame < 180 ? 1 : 2);
+                  if (!kb_first) { kb_first = kb_t2 - kb_t_open; kbl("first frame presented %u us after open (draw %u us, present %u us, convert %u us)", kb_first, kb_t1 - kb_t0, kb_t2 - kb_t1, gfx_last_conv_us); }
+                  kb_sum_draw[ph2] += kb_t1 - kb_t0; kb_sum_pres[ph2] += kb_t2 - kb_t1; kb_sum_conv[ph2] += gfx_last_conv_us; kb_present_n[ph2]++;
+                  if (kb_frame < 12 || kb_frame % 30 == 0) kbl("frame %u: draw %u us, present %u us (convert %u us)", kb_frame, kb_t1 - kb_t0, kb_t2 - kb_t1, gfx_last_conv_us); }
+#endif
+            } else {
+                gfx_noclip();
+                VIDEO_WaitVSync();   /* sin cambios: no se dibuja ni se presenta nada */
+            }
+            kb_hash = h; kb_phase = phase; pcv = in_ptr.valid; pcx = in_ptr.x; pcy = in_ptr.y; pshift = shift;
+            need_full = !have_snap;   /* sin copia (MEM2 llena): se redibuja todo como antes */
+        }
+#ifdef KBD_BENCH
+        {
+            unsigned kb_t2 = KBT(); int ph = kb_frame < 90 ? 0 : (kb_frame < 180 ? 1 : 2);
+            (void)kb_t1pre; (void)did_present;
+            kb_n[ph]++; kb_loop[ph] += kb_t2 - kb_t_prev;
+            if (kb_t2 - kb_t_prev > kb_max[ph]) kb_max[ph] = kb_t2 - kb_t_prev;
+            kb_t_prev = kb_t2; kb_frame++;
+            if (kb_frame == 241) {
+                static const char *nm[3] = { "idle", "pointer-hover", "typing" };
+                for (int q = 0; q < 3; q++) if (kb_n[q]) {
+                    unsigned pn = kb_present_n[q] ? kb_present_n[q] : 1;
+                    kbl("SUMMARY %-13s loops=%u presented=%u | per presented frame: draw=%u us present=%u us (convert %u us) cpu-work=%u us | avg loop=%u us max=%u us", nm[q], kb_n[q], kb_present_n[q], kb_sum_draw[q] / pn, kb_sum_pres[q] / pn, kb_sum_conv[q] / pn, (kb_sum_draw[q] + kb_sum_conv[q]) / pn, kb_loop[q] / kb_n[q], kb_max[q]);
+                }
+                kbl("DONE");
+            }
+        }
+#endif
 
         if (fire < 0 && (d & WPAD_BUTTON_A) && !UI.consumed)
             fire = r < KB_ROWS ? -2 : c;
@@ -306,8 +504,10 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
                 } else ui_toast("No entra: el mensaje ya esta lleno.");
             }
             wait_release();
+            need_full = 1;   /* la grilla de emotes pisó el lienzo: capa estatica de nuevo */
         }
     }
+    gfx_ui_cache_invalidate();
     return done == 1;
 }
 

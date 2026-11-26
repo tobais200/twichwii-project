@@ -1520,6 +1520,17 @@ u32 at_hook(void) {
     } else if (phase==14) {
         if (at_ms()>1500) { LOG("CATS autotest done n=%d pages=%d", bcats.n, pages); quit=1; }
     }
+#elif defined(AUTOTEST_HOMEKEY)
+    /* HOME en la pantalla de categorias */
+    switch(at_step){
+#ifdef HK_STAY_HOME
+    case 0: if(at_wait(SCR_HOME,14000)){at_next();LOG("homekey: inicio, inyecto HOME");b=WPAD_BUTTON_HOME;}break;
+#else
+    case 0: if(at_wait(SCR_HOME,9000)){at_next();screen=SCR_BROWSE;if(!bloaded||!bcats.n)load_browse();LOG("homekey: pantalla categorias n=%d",bcats.n);}break;
+    case 1: if(at_wait(SCR_BROWSE,8000)){at_next();LOG("homekey: inyecto HOME");b=WPAD_BUTTON_HOME;}break;
+#endif
+    case 2: if(at_ms()>15000){at_next();quit=1;}break;
+    }
 #elif defined(AUTOTEST_VOD_ONLY)
     switch(at_step){
     case 0:if(at_wait(SCR_HOME,6000)&&live_loaded){at_next();open_channel(NULL,"auronplay");}break;
@@ -1631,6 +1642,9 @@ int main(int argc, char **argv) {
     ui_set_backdrop(draw_home);
     rebuild_filter();
     int net = intro_run();
+#ifdef KBD_BENCH
+    { char kbq[40] = ""; ui_set_backdrop(draw_home); sui_text_input("Buscar", "Escribi el nombre de un canal", kbq, sizeof(kbq) - 1); quit = 1; }
+#endif
     if (!net) ui_toast("La red no est\xc3\xa1 lista; toc\xc3\xa1 Actualizar para reintentar.");
     else {
         check_server();
@@ -1800,12 +1814,18 @@ int main(int argc, char **argv) {
             if (d & WPAD_BUTTON_2) { kstream_t c = chan; open_channel(&c, c.slug); }
         }
     }
-    stop_watch();
-    dlog("salida"); dlog_flush(1);
-    if (atlog) fclose(atlog);
+    /* HOME / Salir: primero se muestra "Saliendo..." (antes se detenia todo antes de dibujar y, con las
+     * miniaturas de Categorias bajando, el cierre podia quedar colgado con el cuadro a medias); despues se
+     * cortan los pedidos de red, se frenan los hilos de miniaturas y la pantalla se deja en negro. */
     gfx_clear(C_BG);
     ui_logo(SCR_W / 2 - 24, 180, 48);
     gfx_text_c(&font_bold, SCR_W / 2, 250, "Saliendo...", C_DIM);
     gfx_present();
+    guard_kill_socks(LWP_THREAD_NULL);
+    chat_stop(); tp_stop(); playing = 0;
+    thumbs_pause(1);
+    dlog("salida"); dlog_flush(1);
+    if (atlog) fclose(atlog);
+    gfx_black_now();
     return 0;
 }

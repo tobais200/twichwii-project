@@ -45,6 +45,8 @@ void gfx_blit_scaled(const u32 *px, int pw, int ph, int x, int y, int w, int h);
 /* rc14: filas de UI actualizadas sin redibujar todo (emotes animados) */
 void gfx_ui_mark_rect(int x0, int y0, int x1, int y1);
 int  gfx_ui_commit_rows(void);
+void gfx_ui_cache_invalidate(void);
+void gfx_black_now(void);
 void gfx_get_clip(int *x0, int *y0, int *x1, int *y1);
 
 /* iconos dibujados con primitivas (arte propio) */

@@ -8,6 +8,7 @@
 #include <math.h>
 #include <malloc.h>
 #include <gccore.h>
+#include <ogc/lwp_watchdog.h>
 #include "gfx.h"
 #include "tv.h"
 #include "mem2.h"
@@ -176,8 +177,14 @@ static inline u32 rgb2yuyv(u32 a, u32 b) {
     return ((u32)y1 << 24) | ((u32)cb << 16) | ((u32)y2 << 8) | (u32)cr;
 }
 
+#ifdef KBD_BENCH
+unsigned gfx_last_conv_us;
+#endif
 void gfx_present(void) {
     guard_beat();
+#ifdef KBD_BENCH
+    u64 kb_pt0 = gettime();
+#endif
     cur ^= 1;
     xfb_gen[cur] = 0;
     u32 *dst = (u32 *)xfb[cur];
@@ -194,6 +201,9 @@ void gfx_present(void) {
     DCFlushRange(xfb[cur], VIDEO_GetFrameBufferSize(rmode));
     VIDEO_SetNextFramebuffer(xfb[cur]);
     VIDEO_Flush();
+#ifdef KBD_BENCH
+    gfx_last_conv_us = (unsigned)ticks_to_microsecs(gettime() - kb_pt0);
+#endif
     VIDEO_WaitVSync();
 }
 
@@ -203,13 +213,14 @@ void gfx_clip(int x, int y, int w, int h) {
 }
 void gfx_noclip(void) { cx0 = 0; cy0 = 0; cx1 = SCR_W; cy1 = SCR_H; }
 
+/* Mezcla d -> c con alpha a (0..255). Resultado identico al calculo canal por canal
+ * (d + ((c - d) * a >> 8)), pero con R y B en un solo producto y G en otro (2 multiplicaciones en vez de 6). */
 static inline u32 blend(u32 d, u32 c, int a) {
     a += a >> 7;
-    int dr = (d >> 16) & 255, dg = (d >> 8) & 255, db = d & 255;
-    int r = dr + (((((int)(c >> 16) & 255) - dr) * a) >> 8);
-    int g = dg + (((((int)(c >> 8) & 255) - dg) * a) >> 8);
-    int b = db + (((((int)c & 255) - db) * a) >> 8);
-    return (r << 16) | (g << 8) | b;
+    unsigned iw = 256 - a;
+    u32 rb = ((d & 0xff00ff) * iw + (c & 0xff00ff) * a) >> 8;
+    u32 g = ((d & 0xff00) * iw + (c & 0xff00) * a) >> 8;
+    return (rb & 0xff00ff) | (g & 0xff00);
 }
 u32 gfx_mix(u32 a, u32 b, int t) { return blend(a, b, t); }
 
@@ -608,9 +619,28 @@ int gfx_ui_commit_rows(void) {
     if (n) pend_any[0] = pend_any[1] = 1;
     return n;   /* pixeles del XFB reconvertidos */
 }
+/* Salida de la app (HOME / Salir / vigilante): deja los dos XFB en negro y apaga la salida de video
+ * antes de devolver el control, asi el cargador (Homebrew Channel / menu de la Wii) nunca muestra
+ * un cuadro a medio dibujar ni basura de memoria mientras reemplaza la RAM. */
+void gfx_black_now(void) {
+    if (!rmode || !xfb[0] || !xfb[1]) return;
+    for (int k = 0; k < 2; k++) {
+        VIDEO_ClearFrameBuffer(rmode, xfb[k], COLOR_BLACK);
+        DCFlushRange(xfb[k], VIDEO_GetFrameBufferSize(rmode));
+    }
+    VIDEO_SetNextFramebuffer(xfb[cur]);
+    VIDEO_Flush();
+    VIDEO_SetBlack(true);
+    VIDEO_Flush();
+    VIDEO_WaitVSync();
+}
+void gfx_ui_cache_invalidate(void) { ui_cache_valid = 0; ui_gen++; xfb_gen[0] = xfb_gen[1] = 0; }
 void gfx_get_clip(int *x0, int *y0, int *x1, int *y1) { *x0 = cx0; *y0 = cy0; *x1 = cx1; *y1 = cy1; }
 void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsigned char *rowsrc) {
     static int xm[FB_W];
+#ifdef KBD_BENCH
+    u64 kb_ct0 = gettime();
+#endif
     if (!uicache || !ui_cache_valid) gfx_ui_cache_rows(0, SCR_H);
     if (!uicache) { gfx_present(); return; }
     int full=vw==SCR_W, wide=gfx_widescreen();
@@ -666,7 +696,11 @@ void gfx_composite(const tv_pic_t *p, int vx, int vy, int vw, int vh, const unsi
         }
     }
     DCFlushRange(xfb[cur],VIDEO_GetFrameBufferSize(rmode));
-    VIDEO_SetNextFramebuffer(xfb[cur]);VIDEO_Flush();VIDEO_WaitVSync();gfx_present_count++;
+    VIDEO_SetNextFramebuffer(xfb[cur]);VIDEO_Flush();
+#ifdef KBD_BENCH
+    gfx_last_conv_us=(unsigned)ticks_to_microsecs(gettime()-kb_ct0);
+#endif
+    VIDEO_WaitVSync();gfx_present_count++;
 }
 
 /* ---- TwitchWii: imagenes con esquinas redondeadas / circulo (avatares) ---- */

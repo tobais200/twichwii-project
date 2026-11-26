@@ -120,12 +120,14 @@ static void *flusher(void *a) {
 __attribute__((weak)) void tp_guard(int level) { (void)level; }
 __attribute__((weak)) void tp_guard_info(char *o, int n) { if (n) o[0] = 0; }
 
+void gfx_black_now(void);
 static void emergency(const char *why) {
     dlog("VIGILANTE UI: salida de emergencia (%s) trabado en '%s'", why, (const char *)g_where);
     g_flush_req = 1;
     for (int i = 0; i < 6 && g_flush_req; i++) usleep(100000);
     guard_kill_socks(LWP_THREAD_NULL);
     tp_guard(2);
+    gfx_black_now();
     _exit(0);   /* sin atexit: vuelve al Homebrew Channel (stub) o al menu de la Wii */
 }
 
