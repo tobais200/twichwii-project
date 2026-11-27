@@ -367,6 +367,7 @@ static int jdecode(const char *v, char *out, int outsz) {
             tmp[0] = *p++; n = 1;
         }
         int i;
+        if (out && n > 1 && o + n > outsz - 1) break;   /* never cut a multi-byte character in half */
         for (i = 0; i < n; i++) {
             if (out) { if (o < outsz - 1) out[o] = tmp[i]; else break; }
             o++;

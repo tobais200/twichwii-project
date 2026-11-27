@@ -10,6 +10,13 @@ int cp_to_ascii(unsigned cp, char *out) {
     if ((cp >= 0xC0 && cp <= 0xFF && cp != 0xD7 && cp != 0xF7) || cp == 0xA1 || cp == 0xBF) {
         out[0] = (char)(0xC0 | (cp >> 6)); out[1] = (char)(0x80 | (cp & 0x3F)); return 2;
     }
+    /* Japanese, Chinese and Korean (kana, CJK ideographs, hangul, full-width forms): kept as UTF-8;
+       the CJK subset/fallback font draws them (or a hollow box when a character is not covered) */
+    if ((cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xA960 && cp <= 0xA97F)
+        || (cp >= 0xAC00 && cp <= 0xD7AF) || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19)
+        || (cp >= 0xFF00 && cp <= 0xFFEF)) {
+        out[0] = (char)(0xE0 | (cp >> 12)); out[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[2] = (char)(0x80 | (cp & 0x3F)); return 3;
+    }
     switch (cp) {
     case 0xE1: case 0xE0: case 0xE2: case 0xE4: case 0xE3: out[0]='a'; return 1;
     case 0xC1: case 0xC0: case 0xC2: case 0xC4: case 0xC3: out[0]='A'; return 1;
