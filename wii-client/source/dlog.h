@@ -1,4 +1,4 @@
-/* dlog.h - registro de diagnostico en sd:/apps/TwitchWii/log.txt (rc6/rc7).
+/* dlog.h - registro de diagnostico en sd:/apps/TwitchWii/log.txt .
    Cualquier hilo puede llamar dlog(); solo el hilo principal escribe a la SD (dlog_flush). */
 #ifndef DLOG_H
 #define DLOG_H

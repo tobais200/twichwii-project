@@ -1,6 +1,6 @@
-/* thumbs.c - imagenes asincronas (rc13 KickWii / rc7 TwichWii).
+/* thumbs.c - imagenes asincronas .
  *
- * rc13: antes habia UN hilo y cada imagen abria una conexion HTTPS nueva
+ * antes habia UN hilo y cada imagen abria una conexion HTTPS nueva
  * (DNS + TCP + handshake TLS con mbedTLS en el CPU de la Wii + parseo del
  * paquete de CA). Ahora:
  *  - 2 hilos de descarga, cada uno con su handle de curl PERSISTENTE:
@@ -44,7 +44,7 @@
 #define DISK_TTL (7 * 86400)
 #define EMOTE_H 32
 #define EMOTE_MAX (384 * 1024)
-/* rc14: emotes animados. Cuadros reducidos al alto del chat (RGB565), con tope por emote y
+/* emotes animados. Cuadros reducidos al alto del chat (RGB565), con tope por emote y
  * un presupuesto global; lo que no entra se muestra con el primer cuadro (estatico). */
 #define ANIM_H 18
 #define ANIM_MAXW 72
@@ -52,7 +52,7 @@
 #define ANIM_MAXB (64 * 1024)
 #define ANIM_BUDGET (1536 * 1024)
 #define ANIM_DISK_SESSION (16 * 1024 * 1024)
-/* rc14: con 128 slots tambien se acota la RAM de las imagenes estaticas (banners de 230 KB) */
+/* con 128 slots tambien se acota la RAM de las imagenes estaticas (banners de 230 KB) */
 #define IMG_BUDGET (8 * 1024 * 1024)
 static volatile u32 img_bytes;
 enum { A_NONE = 0, A_OK, A_STATIC, A_LATER };   /* anim_st: sin probar, cargada, no animado/no entra, reintentar */
@@ -133,7 +133,7 @@ static void rewrite(const char *in, char *out, int sz, char *alt, int asz) {
         snprintf(alt, asz, "%s", in);
         return;
     }
-    /* Kick emotes: rc14: /fullsize primero (desde 2025 casi ningun emote tiene /static: 403)
+    /* Kick emotes: /fullsize primero (desde 2025 casi ningun emote tiene /static: 403)
        y /static (56x56 WebP, ~1 KB) si el fullsize pasa el tope o falla */
     if (starts(in, "https://files.kick.com/emotes/") && (p = strstr(in, "/static")) && !p[7]) {
         snprintf(out, sz, "%.*s/fullsize", (int)(p - in), in);
@@ -215,7 +215,7 @@ static void disk_save(const char *url, const unsigned char *data, int n, const k
     }
     LWP_MutexUnlock(dmtx);
 }
-/* rc14: "KWA1" epoch(4) urllen(2) w(1) h(1) n(1) url delays(2*n) frames(n*w*h*2); n=0 = no animado */
+/* "KWA1" epoch(4) urllen(2) w(1) h(1) n(1) url delays(2*n) frames(n*w*h*2); n=0 = no animado */
 static void anim_name(const char *url, char *out, int sz) { char k[800]; snprintf(k, sizeof k, "anim:%s", url); snprintf(out, sz, "%s/%08x.anm", cache_dir, fnv(k)); }
 static int anim_disk_load(const char *url, kanim_t **out) {
     char fn[140]; unsigned char h[13]; int ok = 0;
@@ -539,7 +539,7 @@ void thumbs_init(void) {
     LWP_MutexInit(&tmtx, false);
     t0 = gettime();
     { char d[2][96], fn[128]; if (fs_data_dirs(TV_APP_NAME, d, 1) > 0) { snprintf(fn, sizeof(fn), "%simgtrace.log", d[0]); trace = fopen(fn, "w"); } }
-    TLOG("thumbs rc13: %d hilos, %d slots, cache disco", NWORK, NSLOT);
+    TLOG("thumbs: %d hilos, %d slots, cache disco", NWORK, NSLOT);
 #endif
     for (int i = 0; i < NWORK; i++) {
         workers[i].th = LWP_THREAD_NULL;
@@ -559,7 +559,7 @@ void thumbs_pause(int p) {
     LWP_MutexLock(mtx); paused = p; LWP_MutexUnlock(mtx);
     /* Do not enter another curl transfer until the workers released their image handles
        (emotes are tiny and keep going while the video plays). */
-    /* rc16: espera acotada (antes sin limite: un worker trabado en un socket de IOS congelaba
+    /* espera acotada (antes sin limite: un worker trabado en un socket de IOS congelaba
        la pantalla cada cuadro del video). A los 1,5 s se le cortan los sockets; a los 3 s se sigue. */
     u64 t0 = gettime(); int killed = 0;
     while (p && any_active(1)) {
@@ -632,7 +632,7 @@ static const kimg_t *get_impl2(const char *path, int emote, const kanim_t **anim
     return NULL;
 }
 static const kimg_t *get_impl(const char *path, int emote) { return get_impl2(path, emote, NULL); }
-/* rc14: sólo desde el hilo principal, con la lista de animaciones visibles vacia
+/* sólo desde el hilo principal, con la lista de animaciones visibles vacia
  * (chat_anim_reset): libera las animaciones menos usadas hasta quedar bajo 7/8 del presupuesto. */
 void thumbs_anim_gc(void) {
     u32 nm = now_ms();

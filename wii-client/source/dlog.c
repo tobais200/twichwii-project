@@ -1,5 +1,5 @@
 /*
- * dlog.c - registro de diagnostico para la Wii real (TwichWii 1.2-rc11, copiado de KickWii).
+ * dlog.c - registro de diagnostico para la Wii real (TwitchWii, copiado de KickWii).
  * Escribe sd:/apps/TwitchWii/log.txt (la sesion anterior queda en log-anterior.txt).
  * Se desactiva creando sd:/apps/TwitchWii/nolog.txt. Tope: 1 MB por sesion.
  * Nunca se registran tokens: las URLs se reducen al host.
@@ -43,7 +43,7 @@ void dlog_init(int sd_ok) {
     on = 0;
     char p[80], p2[80];
     if (!sd_ok) return;
-    /* rc11: fatInitDefault() es verdadero aunque solo monte "usb:"; antes se
+    /* fatInitDefault() es verdadero aunque solo monte "usb:"; antes se
      * hacia mkdir("sd:/apps") igual y libsysbase leia devoptab_list[-1] (NULL)
      * -> excepcion DSI al arrancar en la Wii real. Ahora se usa solo un
      * dispositivo realmente montado. */

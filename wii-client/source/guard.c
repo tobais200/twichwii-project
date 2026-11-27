@@ -1,5 +1,5 @@
 /*
- * guard.c - vigilante del hilo principal (KickWii 1.3-rc16 / TwichWii 1.2-rc11).
+ * guard.c - vigilante del hilo principal (KickWii / TwitchWii).
  *
  * Tobias vio en la Wii real: despues de un rato mirando un directo la imagen queda congelada,
  * el audio sigue y ningun boton responde (habia que apagar la Wii). Eso es el hilo principal

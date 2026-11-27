@@ -1,7 +1,7 @@
 /*
  * fsguard.c - protege mkdir()/rename() de libsysbase contra dispositivos no montados.
  *
- * Bug (crash DSI en Wii real, KickWii 1.3-rc10, PC 802b1a3c en mkdir):
+ * Bug (crash DSI en Wii real, KickWii, PC 802b1a3c en mkdir):
  * mkdir() de libsysbase hace devoptab_list[FindDevice(path)]->mkdir_r sin
  * comprobar que FindDevice devolvio -1. Si "sd:" no esta montado (sin SD, SD
  * que no inicia, o solo hay un disco USB), lee devoptab_list[-1] == NULL y
@@ -39,7 +39,7 @@ int __wrap__rename_r(struct _reent *r, const char *a, const char *b) {
 /* 1 si el dispositivo de la ruta ("sd:/..." o "usb:/...") esta montado. */
 int fs_dev_mounted(const char *path) { return dev_ok(path); }
 
-/* rc12: carpetas de datos de la app en los dispositivos montados, SD primero
+/* carpetas de datos de la app en los dispositivos montados, SD primero
  * y despues USB. Con create!=0 crea <dev>:/apps y <dev>:/apps/<app> (mkdir
  * ya pasa por el wrapper, asi que un dispositivo ausente nunca cuelga). */
 #include <stdio.h>

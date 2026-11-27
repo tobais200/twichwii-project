@@ -95,7 +95,7 @@ u32 in_poll(void) {
     if (forced) {
         /* puntero fijado por la prueba automatica */
     } else if (wd && wd->ir.valid) {
-        /* rc12: el IR esta en coordenadas del XFB; se pasa al lienzo de la zona segura. */
+        /* el IR esta en coordenadas del XFB; se pasa al lienzo de la zona segura. */
         vx = gfx_pointer_x((int)wd->ir.x); vy = gfx_pointer_y((int)wd->ir.y);
         in_ptr.valid = wd->ir.x >= 0 && wd->ir.x < FB_W; in_ptr.idle = 0;
     } else {

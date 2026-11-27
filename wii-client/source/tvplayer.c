@@ -291,8 +291,8 @@ static int fetch(const char *url, mem_t *m, size_t max) {
     if (r != CURLE_OK || code < 200 || code >= 300 || !m->n) {
         if (!abort_req) {
             if (r != CURLE_OK) snprintf(perr, sizeof(perr), "Red: %s %s", curl_easy_strerror(r), errbuf);
-            else if(vod_mode&&(code==401||code==403))snprintf(perr,sizeof(perr),"VOD restringido o solo suscriptores: Twitch denego acceso (%ld).",code);
-            else snprintf(perr, sizeof(perr), "El servidor respondio HTTP %ld", code);
+            else if(vod_mode&&(code==401||code==403))snprintf(perr,sizeof(perr),T("VOD restringido o solo suscriptores: Twitch denego acceso (%ld)."),code);
+            else snprintf(perr, sizeof(perr), T("El servidor respondio HTTP %ld"), code);
         }
         free(m->d); m->d = NULL; m->n = 0;
         return 0;
@@ -366,8 +366,8 @@ static int pick_variant(char *txt, const char *base, char *out, int sz) {
             if (best < 0 || score < best) {
                 best = score; found = 1; cur_h = h;
                 resolve(base, l, out, sz);
-                if (w) snprintf(variant_info, sizeof(variant_info), "%dp %ld kbps", h, bw / 1000);
-                else snprintf(variant_info, sizeof(variant_info), "%ld kbps", bw / 1000);
+                if (w) snprintf(variant_info, sizeof(variant_info), T("%dp %ld kbps"), h, bw / 1000);
+                else snprintf(variant_info, sizeof(variant_info), T("%ld kbps"), bw / 1000);
             }
             pending = NULL;
         }
@@ -383,13 +383,13 @@ static int open_master(const char *murl, char *url, int usz) {
     snprintf(url, usz, "%s", murl);
     for (level = 0; level < 3 && !abort_req; level++) {
         if (!fetch(url, &m, 2 * 1024 * 1024)) return 0;
-        if (!strstr((char *)m.d, "#EXTM3U")) { snprintf(perr, sizeof(perr), "La direccion no es una lista HLS (.m3u8)."); free(m.d); return 0; }
+        if (!strstr((char *)m.d, "#EXTM3U")) { snprintf(perr, sizeof(perr), T("La direccion no es una lista HLS (.m3u8).")); free(m.d); return 0; }
         if (!strstr((char *)m.d, "#EXT-X-STREAM-INF")) { free(m.d); return 1; }
         char base[4096]; snprintf(base, sizeof(base), "%s", eff_url);
         char nu[4096];
         if (!pick_variant((char *)m.d, base, nu, sizeof(nu))) {
             free(m.d);
-            snprintf(perr, sizeof(perr), lim_h ? "El canal no ofrece 360p/160p (la Wii no puede con 480p o mas)." : "Lista maestra sin variantes.");
+            snprintf(perr, sizeof(perr), lim_h ? T("El canal no ofrece 360p/160p (la Wii no puede con 480p o mas).") : T("Lista maestra sin variantes."));
             return 0;
         }
         free(m.d);
@@ -408,12 +408,12 @@ static int refresh_token(char *url, int usz) {
     kstream_t ks;
     if (!refresh_api[0] || n_refresh >= 20 || abort_req) return 0;
     n_refresh++;
-    snprintf(pstatus, sizeof(pstatus), "Renovando acceso...");
+    snprintf(pstatus, sizeof(pstatus), T("Renovando acceso..."));
     if (!fetch(refresh_api, &m, 512 * 1024)) return 0;
     memset(&ks, 0, sizeof(ks));
     int live = tw_parse_token((char *)m.d, &ks, murl, sizeof(murl));
     free(m.d);
-    if (live != 1 || strncmp(murl, "https://", 8)) { snprintf(perr, sizeof(perr), "La transmision termino (el canal ya no esta en vivo)."); return 0; }
+    if (live != 1 || strncmp(murl, "https://", 8)) { snprintf(perr, sizeof(perr), T("La transmision termino (el canal ya no esta en vivo).")); return 0; }
     snprintf(purl, sizeof(purl), "%s", murl);
     return open_master(purl, url, usz);
 }
@@ -428,7 +428,7 @@ static void *net_thread_body(void *arg) {
     long long next_seq = -1;
     (void)arg;
     nc = curl_easy_init();
-    if (!nc) { snprintf(perr, sizeof(perr), "No se pudo iniciar libcurl."); pstate = TP_ERROR; net_eof = 1; return NULL; }
+    if (!nc) { snprintf(perr, sizeof(perr), T("No se pudo iniciar libcurl.")); pstate = TP_ERROR; net_eof = 1; return NULL; }
     {
         static char eb[CURL_ERROR_SIZE];
         sh_curl_common(nc, eb);
@@ -443,7 +443,7 @@ static void *net_thread_body(void *arg) {
     curl_easy_setopt(nc, CURLOPT_BUFFERSIZE, 16L * 1024);   /* recv() de IOS falla con bloques grandes por HTTP plano ("Not enough space") */
     curl_easy_setopt(nc, CURLOPT_ACCEPT_ENCODING, "");
 
-    snprintf(pstatus, sizeof(pstatus), "Conectando...");
+    snprintf(pstatus, sizeof(pstatus), T("Conectando..."));
     if (!open_master(purl, url, sizeof(url))) {
         if (abort_req || !(last_code == 403 || last_code == 401) || !refresh_token(url, sizeof(url))) goto fail;
     }
@@ -453,7 +453,7 @@ static void *net_thread_body(void *arg) {
         sd_stream = !w || (w * h <= 640 * 368);
         if (lim_h) sd_stream = 1;
     }
-    snprintf(pstatus, sizeof(pstatus), "Cargando...");
+    snprintf(pstatus, sizeof(pstatus), T("Cargando..."));
     while (!abort_req) {
         if (force_reinit && cur_map[0]) {
             force_reinit = 0; cur_map[0] = 0;
@@ -462,12 +462,12 @@ static void *net_thread_body(void *arg) {
         if (force_refresh && refresh_api[0]) {
             force_refresh = 0;
             if (!refresh_token(url, sizeof(url))) goto fail;
-            snprintf(pstatus, sizeof(pstatus), "Cargando...");
+            snprintf(pstatus, sizeof(pstatus), T("Cargando..."));
         }
         if (!fetch(url, &m, 2 * 1024 * 1024)) {
             /* 403/401/404 en la lista: casi siempre token vencido -> renovar */
             if (!abort_req && refresh_api[0] && (last_code == 403 || last_code == 401 || last_code == 404 || fails >= 2)) {
-                if (refresh_token(url, sizeof(url))) { fails = 0; snprintf(pstatus, sizeof(pstatus), "Cargando..."); continue; }
+                if (refresh_token(url, sizeof(url))) { fails = 0; snprintf(pstatus, sizeof(pstatus), T("Cargando...")); continue; }
                 goto fail;
             }
             if (++fails >= 6) goto fail;
@@ -483,16 +483,16 @@ static void *net_thread_body(void *arg) {
             else if (!strncmp(l, "#EXT-X-MEDIA-SEQUENCE:", 22)) seq0 = atoll(l + 22);
             else if (!strncmp(l, "#EXT-X-ENDLIST", 14)) endlist = 1;
             else if (!strncmp(l, "#EXT-X-KEY:", 11) && !strstr(l, "METHOD=NONE")) {
-                snprintf(perr, sizeof(perr), "Transmision cifrada (DRM/AES): no compatible.");
+                snprintf(perr, sizeof(perr), T("Transmision cifrada (DRM/AES): no compatible."));
                 free(m.d); goto fail;
             } else if (!strncmp(l, "#EXT-X-MAP:", 11)) {
                 /* fMP4 (Twitch): segmento de inicializacion (moov). Sin BYTERANGE. */
                 char *u = strstr(l, "URI=\"");
-                if (!u || strstr(l, "BYTERANGE")) { snprintf(perr, sizeof(perr), "Formato fMP4 no compatible (EXT-X-MAP con BYTERANGE)."); free(m.d); goto fail; }
+                if (!u || strstr(l, "BYTERANGE")) { snprintf(perr, sizeof(perr), T("Formato fMP4 no compatible (EXT-X-MAP con BYTERANGE).")); free(m.d); goto fail; }
                 u += 5; u[strcspn(u, "\"")] = 0;
                 map_now = u;
             } else if (l[0] && l[0] != '#') {
-                if(nseg>=16384){snprintf(perr,sizeof(perr),"Lista HLS demasiado grande para Wii");free(m.d);goto fail;}
+                if(nseg>=16384){snprintf(perr,sizeof(perr),T("Lista HLS demasiado grande para Wii"));free(m.d);goto fail;}
                 seg_map[nseg]=map_now;seg_uri[nseg++]=l;
             }
         }
@@ -526,7 +526,7 @@ static void *net_thread_body(void *arg) {
                     }
                 }
             }
-            /* rc9: en vivo fMP4 el demuxer mov agrega una entrada de indice por muestra (y un
+            /* en vivo fMP4 el demuxer mov agrega una entrada de indice por muestra (y un
                item de frag_index por moof) que nunca se liberan; sus arrays crecen con
                av_fast_realloc de a ~6% y dejan huecos en el heap (MEM2 bajaba 0,4-1 MB/min).
                Cada REOPEN_SEGS segmentos se vuelve a mandar el mismo init para que el demuxer
@@ -549,7 +549,7 @@ static void *net_thread_body(void *arg) {
                     /* buscar el primer byte de sincronia TS */
                     size_t o = 0;
                     while (o + 188 < s.n && !(s.d[o] == 0x47 && s.d[o + 188] == 0x47)) o++;
-                    if (o + 188 >= s.n) { free(s.d); snprintf(perr, sizeof(perr), "El segmento no es MPEG-TS."); free(m.d); goto fail; }
+                    if (o + 188 >= s.n) { free(s.d); snprintf(perr, sizeof(perr), T("El segmento no es MPEG-TS.")); free(m.d); goto fail; }
                     memmove(s.d, s.d + o, s.n - o); s.n -= o;
                 }
                 sq_push(s.d, (int)s.n);
@@ -570,7 +570,7 @@ static void *net_thread_body(void *arg) {
             }
             if (slow >= 3 && fallback_url[0]) {
                 snprintf(url, sizeof(url), "%s", fallback_url);
-                snprintf(variant_info, sizeof(variant_info), "%dp (auto, liviano)", fallback_h);
+                snprintf(variant_info, sizeof(variant_info), T("%dp (auto, liviano)"), fallback_h);
                 cur_h = fallback_h; fallback_url[0] = 0; slow = 0; n_downgrade++;
                 break;
             }
@@ -589,7 +589,7 @@ static void *net_thread_body(void *arg) {
     curl_easy_cleanup(nc); nc = NULL;
     return NULL;
 fail:
-    if (!abort_req) { pstate = TP_ERROR; if (!perr[0]) snprintf(perr, sizeof(perr), "No se pudo abrir la transmision."); }
+    if (!abort_req) { pstate = TP_ERROR; if (!perr[0]) snprintf(perr, sizeof(perr), T("No se pudo abrir la transmision.")); }
     net_eof = 1;
     free(last_init);
     curl_easy_cleanup(nc); nc = NULL;
@@ -676,19 +676,19 @@ static void *dmx_thread_body(void *arg) {
         unsigned char *ib = av_malloc(32768);
         io = avio_alloc_context(ib, 32768, 0, NULL, io_read, NULL, NULL);
         fc = avformat_alloc_context();
-        if (!io || !fc || !pk || !fr) { snprintf(perr, sizeof(perr), "Sin memoria."); pstate = TP_ERROR; goto out; }
+        if (!io || !fc || !pk || !fr) { snprintf(perr, sizeof(perr), T("Sin memoria.")); pstate = TP_ERROR; goto out; }
         fc->pb = io;
         fc->interrupt_callback.callback = io_interrupt;
         fc->probesize = 512 * 1024;
         fc->max_analyze_duration = 2 * AV_TIME_BASE;
         if (avformat_open_input(&fc, "", av_find_input_format(fmt), NULL) < 0) {
-            if (!abort_req && pstate != TP_ERROR) { snprintf(perr, sizeof(perr), "No se pudo leer el video (%s).", fmt[0] == 'm' && fmt[1] == 'o' ? "fMP4" : "MPEG-TS"); pstate = TP_ERROR; }
+            if (!abort_req && pstate != TP_ERROR) { snprintf(perr, sizeof(perr), T("No se pudo leer el video (%s)."), fmt[0] == 'm' && fmt[1] == 'o' ? "fMP4" : "MPEG-TS"); pstate = TP_ERROR; }
             goto out;
         }
         ai = -1; vi = -1;
         /* reapertura: el audio se conserva si los parametros son iguales (ver abajo) */
         opened++; (void)opened;
-        if (pstate != TP_ERROR && pstate != TP_PLAYING) { snprintf(pstatus, sizeof(pstatus), "Llenando buffer..."); pstate = TP_BUFFERING; }
+        if (pstate != TP_ERROR && pstate != TP_PLAYING) { snprintf(pstatus, sizeof(pstatus), T("Llenando buffer...")); pstate = TP_BUFFERING; }
         while (!abort_req) {
             int r = av_read_frame(fc, pk);
             if (r < 0) break;
@@ -715,7 +715,7 @@ static void *dmx_thread_body(void *arg) {
                            vpar->extradata_size == cp->extradata_size && (!cp->extradata_size || !memcmp(vpar->extradata, cp->extradata, cp->extradata_size)) &&
                            vtb.num == st->time_base.num && vtb.den == st->time_base.den;
                 LWP_MutexUnlock(mtx);
-                if (!same) {   /* rc9: mismo SPS/PPS tras reabrir -> mismo decoder (sin recrearlo) */
+                if (!same) {   /* mismo SPS/PPS tras reabrir -> mismo decoder (sin recrearlo) */
                     AVCodecParameters *np = avcodec_parameters_alloc();
                     avcodec_parameters_copy(np, cp);
                     LWP_MutexLock(mtx);
@@ -733,7 +733,7 @@ static void *dmx_thread_body(void *arg) {
                         if (!swr) {
                             AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
                             if (swr_alloc_set_opts2(&swr, &stereo, AV_SAMPLE_FMT_S16, 48000, &fr->ch_layout, fr->format, fr->sample_rate, 0, NULL) < 0 || swr_init(swr) < 0) {
-                                snprintf(perr, sizeof(perr), "No se pudo convertir el audio."); swr_free(&swr); break;
+                                snprintf(perr, sizeof(perr), T("No se pudo convertir el audio.")); swr_free(&swr); break;
                             }
                         }
                         uint8_t *o[1] = { (uint8_t *)outbuf };
@@ -760,7 +760,7 @@ static void *dmx_thread_body(void *arg) {
         if(vod_mode&&playlist_complete&&net_eof) {
             u64 end=gettime();while(!abort_req&&(full_blocks()>0||vq_count()>0)&&ticks_to_millisecs(gettime()-end)<5000)usleep(20000);
             if(!abort_req){perr[0]=0;pstate=TP_ENDED;}
-        } else {if(!perr[0])snprintf(perr,sizeof(perr),"La transmision termino o se corto.");pstate=TP_ERROR;}
+        } else {if(!perr[0])snprintf(perr,sizeof(perr),T("La transmision termino o se corto."));pstate=TP_ERROR;}
     }
 out:
     av_frame_free(&fr); av_packet_free(&pk);
@@ -863,7 +863,7 @@ static void *vid_thread_body(void *arg) {
     return NULL;
 }
 
-/* ================================================================== rc11: hilos con aviso de fin */
+/* ================================================================== hilos con aviso de fin */
 static volatile int net_done = 1, dmx_done = 1, vid_done = 1;
 static void *net_thread(void *a) { net_thread_body(a); net_done = 1; return NULL; }
 static void *dmx_thread(void *a) { dmx_thread_body(a); dmx_done = 1; return NULL; }
@@ -902,7 +902,7 @@ static void join_and_clean(void) {
     has_audio = has_video = 0; stream_w = stream_h = 0;
     fps_val = 0; fps_cnt = 0; fps_t = 0;
 }
-/* rc11: vigilante del video (como KickWii): sin cuadro nuevo en 10 s con el directo "en vivo"
+/* vigilante del video (como KickWii): sin cuadro nuevo en 10 s con el directo T("en vivo")
    (audio sonando) -> se reabre el directo sin bloquear la pantalla. */
 static int wd_phase = 0, n_restart = 0; static u64 wd_t = 0, last_show_t = 0;
 static void wd_tick(void) {
@@ -915,14 +915,14 @@ static void wd_tick(void) {
         join_and_clean();
         abort_req = 0; perr[0] = 0; pstate = TP_CONNECTING; wd_phase = 0;
         last_show_t = gettime();
-        if (!start_threads()) { snprintf(perr, sizeof(perr), "No se pudieron crear los hilos."); pstate = TP_ERROR; }
+        if (!start_threads()) { snprintf(perr, sizeof(perr), T("No se pudieron crear los hilos.")); pstate = TP_ERROR; }
         return;
     }
     if (pstate != TP_PLAYING || vod_mode || !has_video || cur_vmode == VM_AUDIO) { last_show_t = now; return; }
     if (ticks_to_millisecs(now - last_show_t) > 10000) {
         n_restart++;
         dlog("VIGILANTE video: sin cuadros nuevos hace 10 s (decod %d mostrados %d); reabro el directo (#%d)", nframes, nshown, n_restart);
-        snprintf(pstatus, sizeof(pstatus), "Reconectando... (video congelado)");
+        snprintf(pstatus, sizeof(pstatus), T("Reconectando... (video congelado)"));
         abort_req = 1; wd_phase = 1; wd_t = now; pstate = TP_CONNECTING;
     }
 }
@@ -943,8 +943,8 @@ void tp_guard(int level) {
     if (level >= 3 && th_net != LWP_THREAD_NULL && !net_done) guard_kill_socks(th_net);
 }
 void tp_guard_info(char *o, int n) {
-    snprintf(o, n, "video: estado %d fase %d hilos red%d/demux%d/video%d | decod %d mostrados %d | colas seg %d vq %d audio %d blq%s | red %lld KB",
-             pstate, wd_phase, !net_done, !dmx_done, !vid_done, nframes, nshown, sq_count, vq_count(), full_blocks(), starved ? " SIN AUDIO" : "", net_bytes >> 10);
+    snprintf(o, n, ("video: estado %d fase %d hilos red%d/demux%d/video%d | decod %d mostrados %d | colas seg %d vq %d audio %d blq%s | red %lld KB"),
+             pstate, wd_phase, !net_done, !dmx_done, !vid_done, nframes, nshown, sq_count, vq_count(), full_blocks(), starved ? " NO AUDIO" : "", net_bytes >> 10);
 }
 
 /* ================================================================== hilo principal */
@@ -1003,10 +1003,10 @@ int tp_play(const char *url, int vmode) {
     n_refresh = 0; n_downgrade = 0;
     snprintf(purl, sizeof(purl), "%s", url);
     pstate = TP_CONNECTING;
-    if (!sh_net_ready()) { snprintf(perr, sizeof(perr), "La red no esta disponible."); pstate = TP_ERROR; return 0; }
+    if (!sh_net_ready()) { snprintf(perr, sizeof(perr), T("La red no esta disponible.")); pstate = TP_ERROR; return 0; }
     last_show_t = gettime();
     if (!start_threads()) {
-        snprintf(perr, sizeof(perr), "No se pudieron crear los hilos."); pstate = TP_ERROR; return 0;
+        snprintf(perr, sizeof(perr), T("No se pudieron crear los hilos.")); pstate = TP_ERROR; return 0;
     }
     return 1;
 }
@@ -1016,15 +1016,15 @@ const char *tp_error(void) { return perr; }
 const char *tp_status(void) {
     static char s[96];
     switch (pstate) {
-    case TP_IDLE: return "Detenido";
-    case TP_CONNECTING: return pstatus[0] ? pstatus : "Conectando...";
+    case TP_IDLE: return T("Detenido");
+    case TP_CONNECTING: return pstatus[0] ? pstatus : T("Conectando...");
     case TP_BUFFERING: {
         int fb = full_blocks();
-        snprintf(s, sizeof(s), "Cargando %d%%", has_audio ? (fb * 100 / START_BLK > 99 ? 99 : fb * 100 / START_BLK) : 50);
+        snprintf(s, sizeof(s), T("Cargando %d%%"), has_audio ? (fb * 100 / START_BLK > 99 ? 99 : fb * 100 / START_BLK) : 50);
         return s; }
-    case TP_PLAYING: return vod_mode?"Reproduciendo VOD":"En vivo";
-    case TP_ENDED:return "Fin del VOD";
-    case TP_ERROR: return "Error";
+    case TP_PLAYING: return vod_mode?T("Reproduciendo VOD"):T("En vivo");
+    case TP_ENDED:return T("Fin del VOD");
+    case TP_ERROR: return T("Error");
     }
     return "";
 }
@@ -1039,11 +1039,11 @@ int tp_has_video(void) { return has_video; }
 int tp_has_audio(void) { return has_audio; }
 int tp_vmode(void) { return cur_vmode; }
 const char *tp_mode_text(void) {
-    if (cur_vmode == VM_AUDIO) return "Solo audio";
-    if (pstate == TP_PLAYING && !has_video) return "Solo audio (sin video)";
-    if (lim_h) return cur_h && cur_h < 300 ? "Video 160p (liviano)" : "Video 360p";
-    if (stream_w * stream_h > 640 * 368 || !sd_stream) return "Video HD reducido";
-    return "Video completo";
+    if (cur_vmode == VM_AUDIO) return T("Solo audio");
+    if (pstate == TP_PLAYING && !has_video) return T("Solo audio (sin video)");
+    if (lim_h) return cur_h && cur_h < 300 ? T("Video 160p (liviano)") : T("Video 360p");
+    if (stream_w * stream_h > 640 * 368 || !sd_stream) return T("Video HD reducido");
+    return T("Video completo");
 }
 float tp_audio_level(void) { return voice_on ? alevel : 0; }
 double tp_fps(void) { return fps_val; }
@@ -1051,10 +1051,10 @@ int tp_frames(void) { return nframes; }
 int tp_dropped(void) { return ndropped; }
 long long tp_bytes(void) { return net_bytes; }
 void tp_stats(char *o, int sz) {
-    snprintf(o, sz, "%s%s%dx%d  %.0f fps  buf %.1fs  red %lld KB  desc %d%s",
+    snprintf(o, sz, ("%s%s%dx%d  %.0f fps  buf %.1fs  net %lld KB  drop %d%s"),
              variant_info, variant_info[0] ? " | " : "", stream_w, stream_h, fps_val,
-             full_blocks() * BLKFR / 48000.0, net_bytes >> 10, ndropped, n_refresh ? "  token renovado" : "");
+             full_blocks() * BLKFR / 48000.0, net_bytes >> 10, ndropped, n_refresh ? "  token refreshed" : "");
 #ifdef AUTOTEST
-    { size_t l = strlen(o); if ((int)l < sz) snprintf(o + l, sz - l, "  reab %d", n_soft_reopen); }
+    { size_t l = strlen(o); if ((int)l < sz) snprintf(o + l, sz - l, "  reopen %d", n_soft_reopen); }
 #endif
 }

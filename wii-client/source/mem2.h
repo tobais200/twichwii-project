@@ -1,5 +1,5 @@
 /*
- * MEM2 helpers for TwitchWii 1.2-rc1.
+ * MEM2 helpers for TwitchWii.
  * Huge FFmpeg TX tables are linker-placed in a MEM2 NOLOAD section
  * (0x92000000). The System Menu / HBC DOL loader is not relied on to
  * load or zero that section. twitchwii_mem2_init() zeros it and shrinks

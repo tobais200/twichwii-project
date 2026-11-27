@@ -44,10 +44,10 @@ static int irc_line(irc_conn *c, char *line) {
     if (!strncmp(line, "HTTP/", 5)) { snprintf(status,sizeof(status),"IRC TCP rechazado; probando TLS/WSS..."); return 0; }
     if (!strncmp(line, "PING ", 5)) { char pong[4104]; snprintf(pong, sizeof(pong), "PONG %s\r\n", line + 5); return irc_send(c, pong); }
     if (strstr(line, " RECONNECT")) return 0;
-    if(strstr(line," 001 ")) {c->welcomed=1;snprintf(status,sizeof(status),"IRC %s: conectado",c->label);}
+    if(strstr(line," 001 ")) {c->welcomed=1;snprintf(status,sizeof(status),T("IRC %s: conectado"),c->label);}
     if (strstr(line, "NOTICE") && (strstr(line, "authentication failed") || strstr(line, "Login unsuccessful"))) {
         LWP_MutexLock(mtx);rejected=1;write_ready=0;outgoing[0]=0;LWP_MutexUnlock(mtx);
-        snprintf(status, sizeof(status), "Twitch rechazo la autenticacion. Inicia sesion otra vez."); run = 0; return 0;
+        snprintf(status, sizeof(status), T("Twitch rechazo la autenticacion. Inicia sesion otra vez.")); run = 0; return 0;
     }
     /* Respect moderator deletion without retaining deleted content. */
     if (strstr(line, " CLEARCHAT ") || strstr(line, " CLEARMSG ")) {
@@ -74,7 +74,7 @@ static int irc_connect(void) {
     if (getaddrinfo("irc.chat.twitch.tv", "6667", &hints, &res)) return -1;
     int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0) { freeaddrinfo(res); return -1; }
-    guard_sock_add(fd);   /* rc11: el vigilante lo puede cortar */
+    guard_sock_add(fd);   /* el vigilante lo puede cortar */
     unsigned long nonblock = 1;
     if (ioctl(fd, FIONBIO, &nonblock) < 0) { guard_sock_del(fd); close(fd); freeaddrinfo(res); return -1; }
     int rc = connect(fd, res->ai_addr, res->ai_addrlen); freeaddrinfo(res);
@@ -96,7 +96,7 @@ static void *direct_thread(void *unused) {
  static const char *labels[]={"TCP 6667","TLS 6697","WSS 443","WS 80"};
  while(run) {
   irc_conn c={.fd=-1,.label=labels[mode]};
-  snprintf(status,sizeof(status),"Conectando IRC %s...",c.label);
+  snprintf(status,sizeof(status),T("Conectando IRC %s..."),c.label);
   int ok=0;
   if(mode==0){c.fd=irc_connect();ok=c.fd>=0;}
   else {
@@ -130,8 +130,8 @@ static void *direct_thread(void *unused) {
      char text[351]="",command[440];static char etag[600];etag[0]=0;LWP_MutexLock(mtx);if(outgoing[0]){snprintf(text,sizeof(text),"%s",outgoing);snprintf(etag,sizeof(etag),"%s",outgoing_tag);outgoing[0]=0;outgoing_tag[0]=0;}LWP_MutexUnlock(mtx);
      if(text[0]){snprintf(command,sizeof(command),"PRIVMSG #%s :%s\r\n",login,text);
       /* Clear before I/O: an uncertain/disconnected send is NEVER replayed. */
-      if(!irc_send(&c,command)){push("Sistema","Envio incierto: no se reintentara automaticamente",0,1);alive=0;}
-      else {push_e(authnick,text,C_ACCENT,0,etag);snprintf(status,sizeof(status),"Mensaje enviado a IRC (sujeto a moderacion)");}
+      if(!irc_send(&c,command)){push(T("Sistema"),T("Envio incierto: no se reintentara automaticamente"),0,1);alive=0;}
+      else {push_e(authnick,text,C_ACCENT,0,etag);snprintf(status,sizeof(status),T("Mensaje enviado a IRC (sujeto a moderacion)"));}
       memset(text,0,sizeof(text));memset(command,0,sizeof(command));
      }
     }
@@ -140,7 +140,7 @@ static void *direct_thread(void *unused) {
     if(ticks_to_millisecs(now-ping)>30000){if(!irc_send(&c,"PING :wii\r\n"))break;ping=now;}
    }
    LWP_MutexLock(mtx);write_ready=0;int dropped=outgoing[0]!=0;outgoing[0]=0;LWP_MutexUnlock(mtx);
-   if(dropped)push("Sistema","Chat desconectado: mensaje descartado; no se reenvia",0,1);
+   if(dropped)push(T("Sistema"),T("Chat desconectado: mensaje descartado; no se reenvia"),0,1);
    if(c.fd>=0){guard_sock_del(c.fd);close(c.fd);}
    cn_close(net);
   }
@@ -150,7 +150,7 @@ static void *direct_thread(void *unused) {
  mode=1;
 #endif
   }else cycles=0;
-  snprintf(status,sizeof(status),"Reconectando IRC: %s",labels[mode]);
+  snprintf(status,sizeof(status),T("Reconectando IRC: %s"),labels[mode]);
   int i,wait=cycles>=4?150:10;for(i=0;i<wait&&run;i++)usleep(100000);
  }
  cn_close(net);free(net);return NULL;

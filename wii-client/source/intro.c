@@ -146,9 +146,9 @@ static void draw(int ms, int out_ms) {
     }
     float st = clampf((ms - 1100) / 500.0f);
     if (st > 0) {
-        int w = gfx_text_w(&font_bold, "para Wii") + 24;
+        int w = gfx_text_w(&font_bold, T("para Wii")) + 24;
         gfx_rrect(SCR_W/2 - w / 2, 300, w, 26, 13, gfx_mix(BGC, 0xFFFFFF, (int)(255 * st)), 255);
-        gfx_text_c(&font_bold, SCR_W/2, 303, "para Wii", gfx_mix(BGC, 0x000000, (int)(255 * st)));
+        gfx_text_c(&font_bold, SCR_W/2, 303, T("para Wii"), gfx_mix(BGC, 0x000000, (int)(255 * st)));
     }
     if (ms > 1500) {
         int i, ph = (ms / 150) % 6;
@@ -156,12 +156,12 @@ static void draw(int ms, int out_ms) {
             int on = (ph == i || ph == i + 1);
             gfx_circle(SCR_W/2 - 16 + i * 16, 362, on ? 5 : 4, on ? 0xFFFFFF : 0x6A2FD0, 255);
         }
-        gfx_text_c(&font_small, SCR_W/2, 380, net_done ? (net_res ? "Conectado" : "Sin red") : "Conectando...", 0xE6DAFF);
+        gfx_text_c(&font_small, SCR_W/2, 380, net_done ? (net_res ? T("Conectado") : T("Sin red")) : "Conectando...", 0xE6DAFF);
     }
     if (ms > 1800) {
-        gfx_text_c(&font_small, SCR_W/2, 424, "M\xc3\xbasica: Debussy, R\xc3\xaaverie - David Hernando Vitores (CC BY-SA 4.0)", 0xD9C7FF);
-        gfx_text_c(&font_small, SCR_W/2, 442, "App no oficial hecha por fans - no afiliada a Twitch ni a Nintendo", 0xD9C7FF);
-        gfx_text(&font_small, SCR_W - 16 - gfx_text_w(&font_small, "A: saltar  B: silencio"), 18, "A: saltar  B: silencio", 0xD9C7FF);
+        gfx_text_c(&font_small, SCR_W/2, 424, T("M\xc3\xbasica: Debussy, R\xc3\xaaverie - David Hernando Vitores (CC BY-SA 4.0)"), 0xD9C7FF);
+        gfx_text_c(&font_small, SCR_W/2, 442, T("App no oficial hecha por fans - no afiliada a Twitch ni a Nintendo"), 0xD9C7FF);
+        gfx_text(&font_small, SCR_W - 16 - gfx_text_w(&font_small, T("A: saltar  B: silencio")), 18, T("A: saltar  B: silencio"), 0xD9C7FF);
     }
     if (ms < 400) fade_black(255 - ms * 255 / 400);
     if (out_ms >= 0) fade_black(out_ms * 255 / 300);
@@ -190,7 +190,7 @@ int intro_run(void) {
         if (out_ms >= 300) break;
     }
     if (net_th != LWP_THREAD_NULL) {
-        if (!net_done) { sui_busy("TwitchWii", "Iniciando la red..."); while (!net_done) { ui_busy_tick(); VIDEO_WaitVSync(); } sui_busy_end(); }
+        if (!net_done) { sui_busy("TwitchWii", T("Iniciando la red...")); while (!net_done) { ui_busy_tick(); VIDEO_WaitVSync(); } sui_busy_end(); }
         LWP_JoinThread(net_th, NULL); net_th = LWP_THREAD_NULL;
     }
     return net_res;

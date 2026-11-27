@@ -14,10 +14,11 @@
 #include <gctypes.h>
 #include "gfx.h"
 #include "auth.h"
+#include "i18n.h"
 
 #include "clock_sync.h"
 
-#define TV_VERSION "1.0"
+#define TV_VERSION "1.1"
 #define TV_UA          "Mozilla/5.0 (Nintendo Wii; U; ; 3642; es) AppleWebKit/535.19 (KHTML, like Gecko) TwitchWii/" TV_VERSION
 #define TV_CFG_DIR     "sd:/apps/TwitchWii/"
 #define TV_APP_NAME    "TwitchWii"
@@ -109,7 +110,7 @@ char *sh_html_to_text(const char *html);
 void  sh_curl_common(void *curl, char *errbuf);
 int   sh_request(const char *method, const char *url, const char *const *headers, const char *body, const char *ua, sh_resp_t *r);
 void  sh_resp_free(sh_resp_t *r);
-long  auth_helix_get(const char *pathq, sh_resp_t *r);   /* rc8: auth.c */
+long  auth_helix_get(const char *pathq, sh_resp_t *r);   /* auth.c */
 const char *jws(const char *p);
 const char *jskip(const char *p);
 const char *jget(const char *obj, const char *key);
@@ -162,13 +163,15 @@ void tcatlist_clear(tcatlist_t *l);
 tcat_t *tcatlist_add(tcatlist_t *l);
 
 enum { PM_PROXY = 0, PM_TRANSCODE, PM_DIRECT, PM_N };   /* modo de reproduccion */
-extern const char *pm_names[PM_N];
+const char *pm_name(int i);   /* translated playback-mode name */
 extern char k_server[128];      /* "http://192.168.0.10:8788" o "" (= directo a Twitch) */
 extern int  k_server_ok;
 extern int  k_play_mode;
 extern int  k_lang;
 extern const char *k_langs[];   /* "es", "all", "en", "pt" */
-extern const char *k_lang_names[];
+const char *k_lang_name(int i);   /* stream-language filter name */
+void k_lang_default_from_ui(void);
+extern int ui_lang_explicit;
 extern int  k_nlangs;
 extern int  k_show_mature;      /* 0 = ocultar +18 y apuestas (por defecto) */
 extern int  k_chat_on;          /* chat de solo lectura al ver un directo */
@@ -191,7 +194,7 @@ int  tw_vod_url(const tvod_t *v, char *url, int usz, char *err, int esz);
 int  tw_parse_token(const char *json, kstream_t *info, char *url, int usz);
 
 /* ---- chat.c: chat de solo lectura (via companion), hilo propio ---- */
-/* rc7: ne emotes de Twitch en text[eat[i]..+elen[i]], id en eid (tag IRC "emotes"). */
+/* ne emotes de Twitch en text[eat[i]..+elen[i]], id en eid (tag IRC "emotes"). */
 typedef struct { char name[28]; char text[200]; u32 color; int sys; unsigned char ne, eat[8], elen[8]; char eid[8][48]; } tchat_t;
 int emote_url(const char *id, char *out, int cap);
 void chat_test_inject(void);            /* chat.c */
@@ -205,19 +208,19 @@ const char *chat_status(void);
 
 /* ---- thumbs.c: miniaturas/avatares RGB del companion, en un hilo aparte ---- */
 typedef struct { int w, h; u32 *px; } kimg_t;
-/* rc8: emote animado reducido al alto del chat. px = n cuadros w*h RGB565, ANIM_KEY = transparente. */
+/* emote animado reducido al alto del chat. px = n cuadros w*h RGB565, ANIM_KEY = transparente. */
 #define ANIM_KEY 0xF81F
 typedef struct { int n, w, h, total; u16 *px; u16 *dly; u32 bytes; } kanim_t;
-const kimg_t *emote_get_anim(const char *url, const kanim_t **anim); /* rc8: tambien devuelve la animacion si hay */
-void thumbs_mem(char *out, int cap);       /* rc8: estado de memoria de imagenes (para logs) */
+const kimg_t *emote_get_anim(const char *url, const kanim_t **anim); /* tambien devuelve la animacion si hay */
+void thumbs_mem(char *out, int cap);       /* estado de memoria de imagenes (para logs) */
 void thumbs_anim_gc(void);
-void chat_anim_begin(void);                /* rc8: antes de redibujar todo el panel de chat */
+void chat_anim_begin(void);                /* antes de redibujar todo el panel de chat */
 void chat_anim_reset(void);
 int  chat_anim_tick(void);                 /* avanza los emotes animados visibles; filas reescritas */
 int  chat_anim_count(void);
 void chat_anim_stats(unsigned *rows, unsigned *ticks);
 void chat_test_soak(int k);
-/* rc8: selector de emotes del teclado del chat (emote_ui.c) */
+/* selector de emotes del teclado del chat (emote_ui.c) */
 typedef struct { char name[40]; char id[48]; unsigned char group, locked; char note[24]; } emo_item_t;
 int emote_grid(const char *title, const emo_item_t *it, int n, const char *const *gname, int ng, int *sel);
 int emote_preview_draw(const tchat_t *m, int x, int y, int w);
@@ -225,7 +228,7 @@ extern int (*sui_kb_emote_hook)(char *out, int cap);
 extern int (*sui_kb_preview)(const char *buf, int x, int y, int w);
 void thumbs_init(void);
 void thumbs_pause(int p);                 /* 1 = no bajar nada (video a pantalla completa) */
-const kimg_t *emote_get(const char *url);  /* rc7: cola de emotes del chat */
+const kimg_t *emote_get(const char *url);  /* cola de emotes del chat */
 const kimg_t *thumb_get(const char *path); /* NULL si todavia no esta; la pide */
 void thumbs_flush(void);                  /* cambia el servidor: vaciar */
 int  thumbs_pending(void);

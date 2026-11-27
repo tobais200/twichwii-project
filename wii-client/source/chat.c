@@ -39,7 +39,7 @@ static u32 parse_color(const char *c) {
     return v;
 }
 
-/* rc7: tag IRC "emotes=25:0-4,12-16/1902:6-10" (indices en caracteres) -> rangos en bytes de text. */
+/* tag IRC "emotes=25:0-4,12-16/1902:6-10" (indices en caracteres) -> rangos en bytes de text. */
 static void parse_emotes(tchat_t *m, const char *tag) {
     m->ne = 0;
     if (!tag || !tag[0] || m->sys) return;
@@ -121,7 +121,7 @@ static void *chat_thread(void *a) {
                 v = jget(e, "sys");
                 push(nm, tx, parse_color(co), v && *jws(v) == 't');
             }
-        } else snprintf(status, sizeof(status), "sin respuesta del servidor");
+        } else snprintf(status, sizeof(status), T("sin respuesta del servidor"));
         sh_resp_free(&r);
         int i;
         for (i = 0; i < 15 && run; i++) usleep(100 * 1000);
@@ -129,7 +129,7 @@ static void *chat_thread(void *a) {
     return NULL;
 }
 
-/* rc11: el hilo principal nunca espera sin limite al hilo del chat (ver guard.c). A los 1,5 s se le
+/* el hilo principal nunca espera sin limite al hilo del chat (ver guard.c). A los 1,5 s se le
  * cortan los sockets; a los 4 s se lo abandona (zombi) y el chat nuevo arranca cuando termine. */
 static volatile int th_done = 1; static lwp_t th_zombie = LWP_THREAD_NULL;
 static int pending_start; static char pending_who[48];
@@ -155,7 +155,7 @@ void chat_stop(void) {
 void chat_start(const char *who) {
     chat_stop();
     if (!mtx_ok) { LWP_MutexInit(&mtx, false); mtx_ok = 1; }
-    if (!reap()) { snprintf(pending_who, sizeof(pending_who), "%s", who); pending_start = 1; snprintf(status, sizeof(status), "Chat: cerrando la conexion anterior..."); return; }
+    if (!reap()) { snprintf(pending_who, sizeof(pending_who), "%s", who); pending_start = 1; snprintf(status, sizeof(status), T("Chat: cerrando la conexion anterior...")); return; }
     LWP_MutexLock(mtx); head = count = 0; gen++; LWP_MutexUnlock(mtx);
     snprintf(login, sizeof(login), "%s", who);
     authenticated=auth_irc_snapshot(authpass,sizeof(authpass),authnick,sizeof(authnick));
@@ -180,12 +180,12 @@ int chat_get(tchat_t *out, int max) {
 }
 
 /* The UI only enqueues; the IRC worker is the sole socket owner/writer. */
-/* rc11: tag = rangos de emotes calculados en la Wii (formato del tag IRC "emotes").
+/* tag = rangos de emotes calculados en la Wii (formato del tag IRC "emotes").
  * Twitch no devuelve por IRC el mensaje propio, asi que el eco local se dibuja con esto. */
 int chat_send_text_e(const char *text, const char *tag) {
  if(!mtx_ok||!auth_message_valid(text))return 0;
 #ifdef SEND_DRYRUN
- /* rc8 PRUEBA: no se envia nada; se guarda la linea IRC que se mandaria */
+ /* no se envia nada; se guarda la linea IRC que se mandaria */
  {FILE*f=fopen("sd:/twitchwii-test/dryrun-payload.txt","a");if(f){fprintf(f,"PRIVMSG #%s :%s\n",login,text);fclose(f);}push_e(authnick[0]?authnick:"yo",text,C_ACCENT,0,tag);return 1;}
 #endif
  LWP_MutexLock(mtx);int ok=run&&authenticated&&write_ready&&!outgoing[0]&&(!last_send||ticks_to_millisecs(gettime()-last_send)>=2000);
@@ -200,7 +200,7 @@ int chat_auth_rejected(void){if(!mtx_ok)return 0;LWP_MutexLock(mtx);int r=reject
 #ifdef AUTOTEST_SOAK
 static const char *soak_id[]={"emotesv2_004b58fc8f3b41f7b48a4c06aeff1540","emotesv2_0b84aba793f74b429b5f4c0375f1c8cb","emotesv2_155841205da744199051303d7421a19e","emotesv2_2ac70f7402324cd0926246c9d8a37ba2","emotesv2_3a5b59f49ec2433bb76a0071ec4997bb","emotesv2_408f173c2508459c9055bc9d6addd166","emotesv2_49ae8b88111a4b34826575368091fc56","emotesv2_507e418dc024418eacfb92751d345ea7","emotesv2_584a7f8bd36046b1ad96eb2d7ab8a5e8","emotesv2_64820eca5e6444479e04e77c1356bca4","emotesv2_695dc2c4d953441ab37a510befd00194","emotesv2_6a06e06a83a3442cb3784528d5d7c674","emotesv2_7573eea6f0e74d91a42d22077b017a03","emotesv2_9de08b0452e24e3a9c4e75c7b5adf263","emotesv2_c13937fb5d0341ee9fb0b7da1a6ad13b","emotesv2_c2f18c53b60f4ab6a3141d52f5c741fd","emotesv2_d210039682c6418086b5194ca24e70bd","emotesv2_d9dc5705d728493ebf3f0ae0be3fc578","emotesv2_e2fe99e21a5a4e8891c5d16bc893a4be","emotesv2_e3d80f41d5d8441d94f83b549ef68706","emotesv2_f95ba7ced8bc4c19886ceafc3294c1f7"};
 static const char *soak_tok[]={"ohneDrilla","ohneRIP","ohneLamonting","kaicSturdyy","xqcSlam","kaicNaenae","ohnePIXEL","kaicWAVE","ohneCool","ohneWAS","ohneExplode","kaicFireMGM","kaicGimmiegold","ohneGABE","xqcDitch","xqcCursed","xqcSus","xqcCheer","ohneJeepers","ohneVas","ohnePls"};
-/* rc8 soak: 3 emotes (animados casi todos) por mensaje, rotando por la lista */
+/* 3 emotes (animados casi todos) por mensaje, rotando por la lista */
 void chat_test_soak(int k){char t[400],tag[600];int n=sizeof(soak_id)/sizeof(soak_id[0]),p=0,q=0;if(!mtx_ok)return;
  p=snprintf(t,sizeof t,"soak%d ",k%10);
  for(int j=0;j<3;j++){int e=(k*3+j)%n,L=strlen(soak_tok[e]);q+=snprintf(tag+q,sizeof tag-q,"%s%s:%d-%d",j?"/":"",soak_id[e],p,p+L-1);p+=snprintf(t+p,sizeof t-p,"%s ",soak_tok[e]);}

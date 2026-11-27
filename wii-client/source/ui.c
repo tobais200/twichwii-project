@@ -5,6 +5,7 @@
  * Todo el arte es propio (primitivas de gfx.c).
  */
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,7 +152,7 @@ static void busy_draw(void) {
     ui_panel(x, y, w, h, busy_title);
     ui_spinner(x + 44, y + 92, 16);
     gfx_text_fit(&font_body, x + 78, y + 72, busy_msg, C_TEXT, w - 96);
-    gfx_text(&font_small, x + 78, y + 100, "HOME = cancelar", C_FAINT);
+    gfx_text(&font_small, x + 78, y + 100, T("HOME = cancelar"), C_FAINT);
     ui_present();
     busy_last = gettime();
 }
@@ -189,7 +190,7 @@ static void kb_char(char *buf, int max, int *len, int ch) {
     if (ch < 0x80) { if (*len < max) { buf[(*len)++] = ch; buf[*len] = 0; } }
     else if (*len + 1 < max) { buf[(*len)++] = 0xC0 | (ch >> 6); buf[(*len)++] = 0x80 | (ch & 0x3F); buf[*len] = 0; }
 }
-/* rc14: selector de emotes en el teclado. La app los fija antes de abrir el teclado
+/* selector de emotes en el teclado. La app los fija antes de abrir el teclado
  * (redaccion del chat) y los limpia despues; en las demas pantallas quedan en NULL. */
 int (*sui_kb_emote_hook)(char *out, int cap) = NULL;              /* abre la grilla; 1 = out tiene el texto a insertar */
 int (*sui_kb_preview)(const char *buf, int x, int y, int w) = NULL; /* dibuja el campo con imagenes; devuelve x del cursor o -1 */
@@ -263,8 +264,8 @@ static void kbl(const char *fmt, ...) {
 
 int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,const char *accept,const char *placeholder) {
     int r = 1, c = 0, shift = 0, len = strlen(buf), done = -1, i, k;
-    int px = (SCR_W-592)/2, py = 40, pw = 592, ph = 404;   /* rc14: 20 px mas: la ayuda ya no pisa la ultima fila */
-    static const char *sl[K_NSPECIAL] = { "Espacio", "Borrar", "Limpiar", "Mayus", "Cancelar", "Buscar", "Emotes" };
+    int px = (SCR_W-592)/2, py = 40, pw = 592, ph = 404;   /* 20 px mas: la ayuda ya no pisa la ultima fila */
+    const char *sl[K_NSPECIAL] = { T("Espacio"), T("Borrar"), T("Limpiar"), T("Mayus"), T("Cancelar"), T("Buscar"), T("Emotes") };
     static const int sw0[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84, 0 };
     static const int sw1[K_NSPECIAL] = { 68, 80, 72, 64, 80, 80, 74 };   /* con la tecla Emotes: mismo ancho total */
     const int NK = KB_ROWS * 10 + K_NSPECIAL;
@@ -364,7 +365,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
                 gfx_rrect(fx, fy, fw, fh, 10, 0x0B0B0E, 255);
                 gfx_rframe(fx, fy, fw, fh, 10, 2, C_ACCENT, 255);
                 gfx_icon(IC_SEARCH, fx + 22, fy + fh / 2, 18, C_DIM);
-                gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, has_emo ? "A: tecla   B: borrar   +: aceptar   -: cancelar   2: emotes" : "A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)", C_FAINT);
+                gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, has_emo ? T("A: tecla   B: borrar   +: aceptar   -: cancelar   2: emotes") : T("A: tecla   B: borrar   +: buscar   -: cancelar   (tambien teclado USB)"), C_FAINT);
                 gfx_noclip();
 #ifdef KBD_BENCH
                 unsigned kq2 = KBT();
@@ -492,7 +493,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             case K_EMOTE:  fire = -3; break;
         }
         if (has_emo && (d & WPAD_BUTTON_2)) fire = -3;
-        if (fire == -3) {   /* rc14: grilla de emotes; inserta separado por espacios */
+        if (fire == -3) {   /* grilla de emotes; inserta separado por espacios */
             char ins[96] = "";
             if (sui_kb_emote_hook(ins, sizeof ins) && ins[0]) {
                 int need = strlen(ins) + 2;
@@ -501,7 +502,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
                     memcpy(buf + len, ins, strlen(ins)); len += strlen(ins);
                     if (buf[len - 1] != ' ') buf[len++] = ' ';
                     buf[len] = 0;
-                } else ui_toast("No entra: el mensaje ya esta lleno.");
+                } else ui_toast(T("No entra: el mensaje ya esta lleno."));
             }
             wait_release();
             need_full = 1;   /* la grilla de emotes pisó el lienzo: capa estatica de nuevo */
@@ -511,7 +512,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
     return done == 1;
 }
 
-int sui_text_input(const char *title,const char *hint,char *buf,int max){return sui_text_input_ex(title,hint,buf,max,"Buscar","Canal o slug");}
+int sui_text_input(const char *title,const char *hint,char *buf,int max){return sui_text_input_ex(title,hint,buf,max,T("Buscar"),T("Canal o slug"));}
 
 /* ---------------- lista (menu) ---------------- */
 u32 sui_list(const char *title, const char *help, char **items, int n, int *sel) {
@@ -550,8 +551,8 @@ u32 sui_list(const char *title, const char *help, char **items, int n, int *sel)
             gfx_rrect(px + pw - 8, ty, 4, th, 2, C_LINE, 255);
         }
         int by = py + ph - 32;
-        gfx_text(&font_small, px + 20, by + 8, help ? help : "A: elegir  B: volver", C_FAINT);
-        int back = ui_button(px + pw - 104, by - 2, 88, 28, "Volver", IC_BACK, BS_NORMAL, 0);
+        gfx_text(&font_small, px + 20, by + 8, help ? help : T("A: elegir  B: volver"), C_FAINT);
+        int back = ui_button(px + pw - 104, by - 2, 88, 28, T("Volver"), IC_BACK, BS_NORMAL, 0);
         ui_present();
         if (clicked) return WPAD_BUTTON_A;
         if (back) return WPAD_BUTTON_B;
@@ -586,8 +587,22 @@ int ui_wrap(const void *fontp, const char *text, int maxw, char ***out) {
             while(take>0) {
                 char save=s[take];s[take]=0;int w=gfx_text_w(f,s);s[take]=save;
                 if(w<=maxw)break;
-                int k=take-1;while(k>0&&s[k]!=' ')k--;
-                take=k>0?k:take-1;
+                int k;
+                if(ui_lang==LANG_JA||ui_lang==LANG_ZH||ui_lang==LANG_ZT) {
+                    /* CJK: break between characters (never inside a UTF-8 sequence); keep Latin words together when possible */
+                    k=take-1;while(k>0&&((unsigned char)s[k]&0xC0)==0x80)k--;
+                    if(k>0&&isalnum((unsigned char)s[k-1])&&isalnum((unsigned char)s[k])){int j=k;while(j>0&&s[j]!=' ')j--;if(j>0)k=j;}
+                    for(int kn=0;kn<2&&k>1;kn++){   /* no closing punctuation at the start of a line */
+                        const unsigned char *q=(const unsigned char *)s+k;
+                        int bad=strchr(")]!?,.:;",*q)&&*q||(q[0]==0xE3&&q[1]==0x80&&(q[2]==0x81||q[2]==0x82||q[2]==0x8D||q[2]==0x8F))||(q[0]==0xEF&&q[1]==0xBC&&(q[2]==0x81||q[2]==0x89||q[2]==0x8C||q[2]==0x9A||q[2]==0x9B||q[2]==0x9F));
+                        if(!bad)break;
+                        k--;while(k>0&&((unsigned char)s[k]&0xC0)==0x80)k--;
+                    }
+                    take=k>0?k:take-1;
+                } else {
+                    k=take-1;while(k>0&&s[k]!=' ')k--;
+                    take=k>0?k:take-1;
+                }
             }
             if(take<=0)take=*s?1:0;
             if(n>=cap) {
@@ -631,7 +646,7 @@ u32 sui_text_view(const char *title, const char *help, const char *text) {
             if (scroll > maxs) scroll = maxs;
             if (scroll < 0) scroll = 0;
         }
-        gfx_text(&font_small, px + 120, by + 8, help ? help : "A/B: volver", C_FAINT);
+        gfx_text(&font_small, px + 120, by + 8, help ? help : T("A/B: volver"), C_FAINT);
         int ok = ui_button(px + pw - 120, by, 100, 30, "OK", IC_OK, BS_ACCENT, !in_ptr.valid);
         ui_present();
         if (ok) { ret = WPAD_BUTTON_A; break; }
@@ -646,7 +661,7 @@ u32 sui_text_view(const char *title, const char *help, const char *text) {
     return ret;
 }
 
-void sui_message(const char *title, const char *text) { sui_text_view(title, "A/B: continuar", text); }
+void sui_message(const char *title, const char *text) { sui_text_view(title, T("A/B: continuar"), text); }
 
 int sui_confirm(const char *title, const char *text) {
     char **lines;

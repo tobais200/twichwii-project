@@ -1,4 +1,4 @@
-/* guard.h - vigilante del hilo principal (rc16/rc11), ver guard.c */
+/* guard.h - vigilante del hilo principal , ver guard.c */
 #ifndef GUARD_H
 #define GUARD_H
 #include <gccore.h>

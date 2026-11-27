@@ -67,10 +67,10 @@ int sh_request(const char *method, const char *url, const char *const *headers,
     r->cap = SH_MAX_RESP;
     r->data = malloc(1);
     if (r->data) r->data[0] = 0;
-    if (!sh_net_ready()) { r->res = CURLE_COULDNT_CONNECT; snprintf(r->err, sizeof(r->err), "La red no esta disponible."); return r->res; }
+    if (!sh_net_ready()) { r->res = CURLE_COULDNT_CONNECT; snprintf(r->err, sizeof(r->err), T("La red no esta disponible.")); return r->res; }
 
     curl = curl_easy_init();
-    if (!curl) { r->res = CURLE_FAILED_INIT; snprintf(r->err, sizeof(r->err), "No se pudo iniciar libcurl."); return r->res; }
+    if (!curl) { r->res = CURLE_FAILED_INIT; snprintf(r->err, sizeof(r->err), T("No se pudo iniciar libcurl.")); return r->res; }
     errbuf[0] = 0;
     ca.data = (void *)cacert_pem; ca.len = cacert_pem_size; ca.flags = CURL_BLOB_NOCOPY;
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -104,7 +104,7 @@ int sh_request(const char *method, const char *url, const char *const *headers,
     curl_easy_cleanup(curl);
     curl_slist_free_all(hl);
     if (r->res != CURLE_OK) {
-        if (r->res == CURLE_ABORTED_BY_CALLBACK) snprintf(r->err, sizeof(r->err), "Cancelado (HOME).");
+        if (r->res == CURLE_ABORTED_BY_CALLBACK) snprintf(r->err, sizeof(r->err), T("Cancelado (HOME)."));
         else snprintf(r->err, sizeof(r->err), "curl %d: %s. %s", r->res, curl_easy_strerror(r->res), errbuf);
     }
     return r->res;
@@ -116,9 +116,9 @@ int sh_ok(const sh_resp_t *r) { return r->res == CURLE_OK && r->code >= 200 && r
 
 void sh_error_text(const sh_resp_t *r, char *out, int outsz) {
     if (r->res != CURLE_OK) {
-        snprintf(out, outsz, "Error de red: %s%s", r->err,
+        snprintf(out, outsz, T("Error de red: %s%s"), r->err,
                  (r->res == CURLE_PEER_FAILED_VERIFICATION || r->res == CURLE_SSL_CONNECT_ERROR)
-                 ? "\nSi es de certificado, revisa la fecha y hora de la Wii." : "");
+                 ? T("\nSi es de certificado, revisa la fecha y hora de la Wii.") : "");
         return;
     }
     char msg[300] = "";
@@ -137,7 +137,7 @@ void sh_error_text(const sh_resp_t *r, char *out, int outsz) {
         snprintf(msg, sizeof(msg), "%.280s", t ? t : "");
         free(t);
     }
-    snprintf(out, outsz, "El servidor respondio HTTP %ld.\n%s", r->code, msg);
+    snprintf(out, outsz, T("El servidor respondio HTTP %ld.\n%s"), r->code, msg);
 }
 
 void sh_curl_common(void *c, char *errbuf) {
@@ -155,7 +155,7 @@ void sh_curl_common(void *c, char *errbuf) {
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
-    guard_curl(curl);   /* rc16: sockets registrados (el vigilante los puede cortar) */
+    guard_curl(curl);   /* sockets registrados (el vigilante los puede cortar) */
 }
 
 char *sh_urlencode(const char *s) {
@@ -202,7 +202,7 @@ int sh_cfg_read(const char *name, char *buf, int sz) {
 }
 
 int sh_cfg_write(const char *name, const char *value) {
-    /* rc12: SD si esta montada, si no USB (antes solo sd:/). */
+    /* SD si esta montada, si no USB (antes solo sd:/). */
     char d[2][96], path[192];
     if (fs_data_dirs(TV_APP_NAME, d, 1) < 1) return -1;
     snprintf(path, sizeof(path), "%s%s", d[0], name);

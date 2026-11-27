@@ -2,16 +2,18 @@
 <app version="1">
   <name>TwitchWii</name>
   <coder>tobais200</coder>
-  <version>1.0</version>
-  <release_date>20261125</release_date>
+  <version>1.1</version>
+  <release_date>20261126</release_date>
   <short_description>Unofficial Twitch client for the Nintendo Wii</short_description>
   <long_description>Watch Twitch live streams and videos on your Wii. Browse a live home grid and a category catalog, search for channels, open a channel page, play recent VODs, and use live chat (read anonymously, or write when signed in).
 
 Sign in with a QR code (Twitch Device Code Grant). The session is saved on SD, or on USB if no SD is present, and can be refreshed or signed out from Settings. Follow and Subscribe open a QR code to the official Twitch page on your phone; the Wii does not make payments or change follows by itself. VODs play from the beginning; there is no seek or resume. 4:3 and 16:9 are supported.
 
+The interface is available in English, Spanish, French, German, Italian, Dutch, Portuguese (Brazil), Japanese, Simplified and Traditional Chinese, and Korean. It is picked from the console language and can be changed in Settings; the choice is saved on SD or USB.
+
 An optional companion server (server/twitchwii_server.py) can run on a PC on your network. Enter its IP in Settings to use HTTP proxy or transcoded playback. Without a server, the Wii talks to Twitch over HTTPS for thumbnails, avatars, box art, banners, public VODs, and chat.
 
 Controls: Wii Remote pointer and buttons, including the D-Pad. A Classic Controller, a GameCube controller, and a USB keyboard are also supported.
 
-This is an unofficial fan project, not affiliated with or endorsed by Twitch Interactive, Inc. or Nintendo. Intro music: Claude Debussy, Reverie, performed by David Hernando Vitores (CC BY-SA 4.0, Wikimedia Commons). Licensed under GPL-3.0.</long_description>
+This is an unofficial fan project, not affiliated with or endorsed by Twitch Interactive, Inc. or Nintendo. Intro music: Claude Debussy, Reverie, performed by David Hernando Vitores (CC BY-SA 4.0, Wikimedia Commons). CJK glyph subset from Noto Sans CJK (SIL OFL 1.1). Licensed under GPL-3.0.</long_description>
 </app>

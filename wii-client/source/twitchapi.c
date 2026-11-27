@@ -15,23 +15,48 @@
 #include <ctype.h>
 #include "tv.h"
 #include "auth.h"
+#include "i18n.h"
 
 #define GQL_URL  "https://gql.twitch.tv/gql"
 #define GQL_CID  "kimne78kx3ncx6brgo4mv6wki5h1ko"     /* client-id publico de la web de twitch.tv */
 
+int  ui_lang_explicit = 0;   /* interface language chosen by the user (or loaded from SD/USB) */
 char k_server[128] = "";
 int  k_server_ok = 0;
 int  k_play_mode = PM_PROXY;
 int  k_lang = 0;
-const char *k_langs[] = { "es", "all", "en", "pt" };
-const char *k_lang_names[] = { "Espa\xc3\xb1ol", "Todos", "English", "Portugu\xc3\xaas" };
+/* Stream (broadcast) language filter. Not the interface language (see i18n.c). */
+const char *k_langs[] = { "es", "all", "en", "pt", "fr", "de", "it", "nl", "ja", "ko", "zh" };
+static const char *k_lang_native[] = { "Espa\xc3\xb1ol", NULL, "English", "Portugu\xc3\xaas", "Fran\xc3\xa7" "ais", "Deutsch", "Italiano", "Nederlands", "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e", "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4", "\xe4\xb8\xad\xe6\x96\x87" };
+const char *k_lang_name(int i) {
+    if (i < 0 || i >= (int)(sizeof(k_langs) / sizeof(k_langs[0]))) i = 0;
+    return k_lang_native[i] ? k_lang_native[i] : T("Todos");
+}
+/* First run (no idioma.txt yet): follow the interface language. */
+void k_lang_default_from_ui(void) {
+    switch (ui_lang) {
+    case LANG_ES: k_lang = 0; break;
+    case LANG_PT: k_lang = 3; break;
+    case LANG_FR: k_lang = 4; break;
+    case LANG_DE: k_lang = 5; break;
+    case LANG_IT: k_lang = 6; break;
+    case LANG_NL: k_lang = 7; break;
+    case LANG_JA: k_lang = 8; break;
+    case LANG_KO: k_lang = 9; break;
+    case LANG_ZH: case LANG_ZT: k_lang = 10; break;
+    default:      k_lang = 2; break;   /* English */
+    }
+}
 int  k_nlangs = sizeof(k_langs) / sizeof(k_langs[0]);
-_Static_assert(sizeof(k_langs) == sizeof(k_lang_names), "language tables must match");
+_Static_assert(sizeof(k_langs) == sizeof(k_lang_native), "language tables must match");
 int  k_show_mature = 0;
 int  k_chat_on = 1;
 int  k_last_mock = 0;
 char k_notice[200] = "";
-const char *pm_names[PM_N] = { "Proxy 360p", "Transcodificado 270p", "Directo (HTTPS)" };
+const char *pm_name(int i) {
+    static const char *const n[PM_N] = { "Proxy 360p", "Transcodificado 270p", "Directo (HTTPS)" };
+    return T(n[(i >= 0 && i < PM_N) ? i : 0]);
+}
 
 /* ------------------------------------------------------------------ listas */
 void klist_clear(klist_t *l) { free(l->v); l->v = NULL; l->n = l->cap = 0; }
@@ -120,7 +145,12 @@ void cfg_load(void) {
         else if (!strcmp(b, "direct")) k_play_mode = PM_DIRECT;
         else k_play_mode = PM_PROXY;
     }
-    if (sh_cfg_read("idioma.txt", b, sizeof(b))) {
+    if (sh_cfg_read("idioma-interfaz.txt", b, sizeof(b))) {
+        int l = lang_from_code(b);
+        if (l >= 0) { i18n_set(l); ui_lang_explicit = 1; }
+    }
+    if (!sh_cfg_read("idioma.txt", b, sizeof(b))) k_lang_default_from_ui();   /* no saved stream language: follow the interface language */
+    else {
         int i;
         for (i = 0; i < k_nlangs; i++) if (!strcmp(b, k_langs[i])) k_lang = i;
     }
@@ -135,6 +165,7 @@ void cfg_save(void) {
     sh_cfg_write("server.txt", k_server[0] ? k_server : "directo");
     sh_cfg_write("modo.txt", pm[k_play_mode]);
     sh_cfg_write("idioma.txt", k_langs[k_lang]);
+    if (ui_lang_explicit) sh_cfg_write("idioma-interfaz.txt", lang_code(ui_lang));
     sh_cfg_write("filtro.txt", k_show_mature ? "mostrar-todo" : "ocultar-18-y-apuestas");
     sh_cfg_write("chat.txt", k_chat_on ? "si" : "no");
 }
@@ -142,30 +173,31 @@ void cfg_save(void) {
 /* ------------------------------------------------------------------ HTTP */
 static int check_resp(sh_resp_t *r, int srv, char *err, int esz) {
     if (r->res != 0) {
-        if (srv) snprintf(err, esz, "No se pudo conectar al servidor %s (%s). Revis\xc3\xa1 la IP en Ajustes.", k_server, r->err);
-        else snprintf(err, esz, "Error de red: %s (revis\xc3\xa1 Internet y la fecha/hora de la Wii)", r->err);
+        if (srv) snprintf(err, esz, T("No se pudo conectar al servidor %s (%s). Revis\xc3\xa1 la IP en Ajustes."), k_server, r->err);
+        else snprintf(err, esz, T("Error de red: %s (revis\xc3\xa1 Internet y la fecha/hora de la Wii)"), r->err);
         return 0;
     }
     if (r->code == 404) {
         char m[160] = "";
         if (r->data && *jws(r->data) == '{') jcopy(jws(r->data), "error", m, sizeof(m));
-        snprintf(err, esz, "%s", m[0] ? m : "No existe ese canal.");
+        snprintf(err, esz, "%s", m[0] ? m : T("No existe ese canal."));
         return 0;
     }
-    if (r->code == 429) { snprintf(err, esz, "Demasiados pedidos: esper\xc3\xa1 unos segundos."); return 0; }
-    if (!srv && (r->code == 403 || r->code == 401)) { snprintf(err, esz, "Twitch rechaz\xc3\xb3 el pedido (HTTP %ld). Us\xc3\xa1 el servidor companion.", r->code); return 0; }
+    if (r->code == 429) { snprintf(err, esz, T("Demasiados pedidos: esper\xc3\xa1 unos segundos.")); return 0; }
+    if (!srv && (r->code == 403 || r->code == 401)) { snprintf(err, esz, T("Twitch rechaz\xc3\xb3 el pedido (HTTP %ld). Us\xc3\xa1 el servidor companion."), r->code); return 0; }
     if (r->code < 200 || r->code >= 300) {
         char m[160] = "";
         if (r->data && *jws(r->data) == '{') jcopy(jws(r->data), "error", m, sizeof(m));
-        snprintf(err, esz, "%s respondi\xc3\xb3 HTTP %ld. %s", srv ? "El servidor" : "Twitch", r->code, m);
+        snprintf(err, esz, T("%s respondi\xc3\xb3 HTTP %ld. %s"), srv ? T("El servidor") : "Twitch", r->code, m);
         return 0;
     }
-    if (!r->data || (*jws(r->data) != '{' && *jws(r->data) != '[')) { snprintf(err, esz, "Respuesta inesperada (no es JSON)."); return 0; }
+    if (!r->data || (*jws(r->data) != '{' && *jws(r->data) != '[')) { snprintf(err, esz, T("Respuesta inesperada (no es JSON).")); return 0; }
     return 1;
 }
 
 static int kget(const char *url, sh_resp_t *r, char *err, int esz) {
-    static const char *hdr[] = { "Accept-Language: es-AR,es;q=0.9", NULL };
+    static const char *const al[LANG_COUNT] = { "Accept-Language: en-US,en;q=0.9", "Accept-Language: es-AR,es;q=0.9", "Accept-Language: fr-FR,fr;q=0.9", "Accept-Language: de-DE,de;q=0.9", "Accept-Language: it-IT,it;q=0.9", "Accept-Language: nl-NL,nl;q=0.9", "Accept-Language: pt-BR,pt;q=0.9", "Accept-Language: ja-JP,ja;q=0.9", "Accept-Language: zh-CN,zh;q=0.9", "Accept-Language: zh-TW,zh;q=0.9", "Accept-Language: ko-KR,ko;q=0.9" };
+    const char *hdr[] = { al[ui_lang], NULL };
     int srv = k_server[0] && !strncmp(url, k_server, strlen(k_server));
     sh_request("GET", url, hdr, NULL, NULL, r);
     return check_resp(r, srv, err, esz);
@@ -181,7 +213,7 @@ static const char *gql(const char *body, sh_resp_t *r, char *err, int esz) {
         char m[160] = "";
         const char *e = jget(jws(r->data), "errors");
         if (e && (e = jarr_first(e))) jcopy(e, "message", m, sizeof(m));
-        snprintf(err, esz, "Twitch (GraphQL): %s", m[0] ? m : "respuesta sin datos");
+        snprintf(err, esz, T("Twitch (GraphQL): %s"), m[0] ? m : T("respuesta sin datos"));
         return NULL;
     }
     return d;
@@ -203,11 +235,11 @@ int tw_health(char *err, int esz) {
     char url[200];
     sh_resp_t r;
     k_server_ok = 0;
-    if (!k_server[0]) { snprintf(err, esz, "Sin servidor: modo directo a Twitch."); return 0; }
+    if (!k_server[0]) { snprintf(err, esz, T("Sin servidor: modo directo a Twitch.")); return 0; }
     snprintf(url, sizeof(url), "%s/wii/health", k_server);
     if (!kget(url, &r, err, esz)) { sh_resp_free(&r); return 0; }
     k_server_ok = is_true(jget(jws(r.data), "ok"));
-    if (!k_server_ok) snprintf(err, esz, "El servidor respondi\xc3\xb3 algo raro.");
+    if (!k_server_ok) snprintf(err, esz, T("El servidor respondi\xc3\xb3 algo raro."));
     sh_resp_free(&r);
     return k_server_ok;
 }
@@ -404,9 +436,9 @@ static void fill_cat_helix(tcat_t *c, const char *nd) {
     style_cat(c);
 }
 
-/* rc11: Helix games/top y search/categories no traen espectadores (solo id/nombre/box art).
+/* Helix games/top y search/categories no traen espectadores (solo id/nombre/box art).
  * Se completa slug + viewersCount con el GQL publico, en tandas de 25 ids por consulta.
- * Sin esto cada categoria mostraba "0 espectadores" con la sesion iniciada. */
+ * Sin esto cada categoria mostraba T("0 espectadores") con la sesion iniciada. */
 static void fill_missing_slugs(tcat_t *v, int from, int n, char *err, int esz) {
     char body[2400];
     int base;
@@ -788,7 +820,7 @@ int tw_channel(const char *login_in, kstream_t *s, tvod_t *vods, int maxv, int *
     snprintf(login, sizeof(login), "%s", login_in);
     lower(login);
     int demo = !strncmp(login, "demo_", 5);
-    if (!valid_login(login) && !demo) { snprintf(err, esz, "Nombre de canal inv\xc3\xa1lido: \"%s\".", login_in); return -1; }
+    if (!valid_login(login) && !demo) { snprintf(err, esz, T("Nombre de canal inv\xc3\xa1lido: \"%s\"."), login_in); return -1; }
     kstream_t keep = *s;
     if (k_server[0]) {
         snprintf(url, sizeof(url), "%s/wii/channel/%s", k_server, login);
@@ -806,7 +838,7 @@ int tw_channel(const char *login_in, kstream_t *s, tvod_t *vods, int maxv, int *
         const char *d = gql(body, &r, err, esz);
         if (!d) { sh_resp_free(&r); return -1; }
         const char *u = jget(d, "user");
-        if (!u || jis_null(u)) { snprintf(err, esz, "No existe ese canal."); sh_resp_free(&r); return -1; }
+        if (!u || jis_null(u)) { snprintf(err, esz, T("No existe ese canal.")); sh_resp_free(&r); return -1; }
         const char *st = jget(u, "stream"), *bs = jget(u, "broadcastSettings");
         memset(s, 0, sizeof(*s));
         jcopy(u, "login", s->slug, sizeof(s->slug));
@@ -870,7 +902,7 @@ static int direct_usher(const char *login, char *url, int usz, char *err, int es
     const char *d = gql(body, &r, err, esz);
     if (!d) { sh_resp_free(&r); return 0; }
     const char *t = jget(d, "streamPlaybackAccessToken");
-    if (!t || jis_null(t)) { snprintf(err, esz, "Twitch no dio acceso al video de %s.", login); sh_resp_free(&r); return 0; }
+    if (!t || jis_null(t)) { snprintf(err, esz, T("Twitch no dio acceso al video de %s."), login); sh_resp_free(&r); return 0; }
     jcopy(t, "value", tok, sizeof(tok));
     jcopy(t, "signature", sig, sizeof(sig));
     sh_resp_free(&r);
@@ -885,9 +917,9 @@ int tw_play_url(const kstream_t *s, char *url, int usz, char *refresh, int rsz, 
     static const char *pm[PM_N] = { "proxy", "transcode", "direct" };
     refresh[0] = 0;
     *max_h = 360;
-    if (!s->live) { snprintf(err, esz, "%s no est\xc3\xa1 transmitiendo ahora.", s->name); return 0; }
+    if (!s->live) { snprintf(err, esz, T("%s no est\xc3\xa1 transmitiendo ahora."), s->name); return 0; }
     if (!k_show_mature && (s->mature || s->gambling)) {
-        snprintf(err, esz, "Oculto por el filtro: %s. Se cambia en Ajustes.", s->gambling ? "categor\xc3\xad" "a de apuestas/casino" : "contenido +18");
+        snprintf(err, esz, T("Oculto por el filtro: %s. Se cambia en Ajustes."), s->gambling ? T("categor\xc3\xad" "a de apuestas/casino") : T("contenido +18"));
         return 0;
     }
     if (k_server[0]) {
@@ -901,17 +933,17 @@ int tw_play_url(const kstream_t *s, char *url, int usz, char *refresh, int rsz, 
 
 int tw_vod_url(const tvod_t *v,char *url,int usz,char *err,int esz) {
     if(k_server[0]) {snprintf(url,usz,"%s/play/vod/%s.m3u8?mode=transcode",k_server,v->id);return 1;}
-    int i;for(i=0;v->id[i];i++)if(v->id[i]<'0'||v->id[i]>'9'){snprintf(err,esz,"ID de VOD invalido");return 0;}
-    if(!i){snprintf(err,esz,"ID de VOD vacio");return 0;}
+    int i;for(i=0;v->id[i];i++)if(v->id[i]<'0'||v->id[i]>'9'){snprintf(err,esz,T("ID de VOD invalido"));return 0;}
+    if(!i){snprintf(err,esz,T("ID de VOD vacio"));return 0;}
     char body[900];sh_resp_t r;
     snprintf(body,sizeof(body),"{\"query\":\"query PlaybackAccessToken($vodID:ID!,$isVod:Boolean!){videoPlaybackAccessToken(id:$vodID,params:{platform:\\\"web\\\",playerBackend:\\\"mediaplayer\\\",playerType:\\\"site\\\"}) @include(if:$isVod){value signature}}\",\"variables\":{\"vodID\":\"%s\",\"isVod\":true}}",v->id);
     const char *d=gql(body,&r,err,esz);if(!d){sh_resp_free(&r);return 0;}
     const char *t=jget(d,"videoPlaybackAccessToken");char tok[4096],sig[128];
-    if(!t||jis_null(t)){snprintf(err,esz,"VOD restringido, eliminado o solo para suscriptores.");sh_resp_free(&r);return 0;}
+    if(!t||jis_null(t)){snprintf(err,esz,T("VOD restringido, eliminado o solo para suscriptores."));sh_resp_free(&r);return 0;}
     jcopy(t,"value",tok,sizeof(tok));jcopy(t,"signature",sig,sizeof(sig));sh_resp_free(&r);
-    if(!tok[0]||!sig[0]||is_true(jpath(tok,"authorization.forbidden"))){snprintf(err,esz,"Twitch no autoriza este VOD sin iniciar sesion/suscripcion.");return 0;}
+    if(!tok[0]||!sig[0]||is_true(jpath(tok,"authorization.forbidden"))){snprintf(err,esz,T("Twitch no autoriza este VOD sin iniciar sesion/suscripcion."));return 0;}
     char *et=sh_urlencode(tok);
     int n=snprintf(url,usz,"https://usher.ttvnw.net/vod/%s.m3u8?nauthsig=%s&nauth=%s&allow_source=true&allow_audio_only=true&player=twitchweb&supported_codecs=h264",v->id,sig,et);
     free(et);memset(tok,0,sizeof(tok));
-    if(n>=usz){snprintf(err,esz,"URL VOD demasiado larga");return 0;}return 1;
+    if(n>=usz){snprintf(err,esz,T("URL VOD demasiado larga"));return 0;}return 1;
 }

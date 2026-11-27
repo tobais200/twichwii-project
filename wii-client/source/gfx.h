@@ -16,6 +16,13 @@ extern int gfx_canvas_width;
 typedef struct { short w, h, xoff, yoff, adv; int off; } Glyph;
 typedef struct { int line_h; int ascent; const Glyph *g; const unsigned char *bits; } Font;
 extern const Font font_title, font_bold, font_body, font_small, font_big;
+/* CJK glyph subset (cjk_data.c): 4-bit alpha, sorted code points. Sets: names (always) + 1 ja, 2 zh-Hans, 3 zh-Hant, 4 ko (loaded on demand).
+ * Sizes: 0 = small (14px), 1 = body (15px), 2 = bold/title (16px), 3 = big (32px, only the "Browse" heading). */
+typedef struct { int n; const unsigned short *cp; const Glyph *g; const unsigned char *bits; } CjkSet;
+extern const CjkSet cjk_names[4];                    /* language names: always available */
+extern const unsigned char *const cjk_zdata[4];       /* zlib blobs of the ja/zh/zt/ko sets, inflated only while active */
+extern const unsigned cjk_zlen[4], cjk_rawlen[4];
+void gfx_cjk_select(int set);        /* 0 = none (Latin UI): only the language names can be drawn */
 
 extern u32 *canvas;                  /* 0x00RRGGBB */
 void gfx_init(void);
@@ -42,7 +49,7 @@ int  utf8_next(const char **s);
 u32  gfx_mix(u32 a, u32 b, int t);   /* t 0..255 */
 void gfx_blit_round(const u32 *px, int pw, int ph, int x, int y, int r);   /* r = pw/2: circulo */
 void gfx_blit_scaled(const u32 *px, int pw, int ph, int x, int y, int w, int h);
-/* rc14: filas de UI actualizadas sin redibujar todo (emotes animados) */
+/* filas de UI actualizadas sin redibujar todo (emotes animados) */
 void gfx_ui_mark_rect(int x0, int y0, int x1, int y1);
 int  gfx_ui_commit_rows(void);
 void gfx_ui_cache_invalidate(void);

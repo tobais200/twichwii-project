@@ -1,4 +1,4 @@
-/* emote_ui.c - rc13/rc7: mensajes de chat con emotes como imagenes en linea.
+/* emote_ui.c - mensajes de chat con emotes como imagenes en linea.
  * Mientras la imagen no llego se muestra el texto (":KEKW:" o "Kappa") y despues
  * se reemplaza; el ajuste de lineas se recalcula cada cuadro con el ancho real. */
 #include <stdio.h>
@@ -16,7 +16,7 @@
 #define MAXT 160
 typedef struct { const char *s; int n, w, kind; const kimg_t *im; const kanim_t *an; u32 col; } tok_t;   /* kind 0 texto 1 espacio 2 emote 3 nombre */
 
-/* ---- rc14: emotes animados visibles ----
+/* ---- emotes animados visibles ----
  * Cada emote animado dibujado en el ultimo redibujado completo del chat se anota aca
  * (posicion, recorte, color de fondo). chat_anim_tick() avanza los cuadros segun sus
  * demoras reales y sólo reescribe esas filas (gfx_ui_mark_rect/commit). La lista se
@@ -68,7 +68,7 @@ int chat_anim_tick(void) {
     u32 t = ms_now();
     /* <= 12,5 cuadros/s; con muchos emotes visibles baja a ~8 cuadros/s y actualiza como
      * maximo ANIM_PER_TICK por tick (en ronda), para que la conversion de la UI no le robe
-     * tiempo al video (soak rc14: 30+ animados visibles a 360p bajaban el video). */
+     * tiempo al video (soak 30+ animados visibles a 360p bajaban el video). */
     static int rr;
     if (!nvis || t - anim_last_tick < (nvis > ANIM_PER_TICK ? 120u : 80u)) return 0;
     anim_last_tick = t;
@@ -110,7 +110,7 @@ static int u8len(const char *s) {
     return c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 1;
 }
 
-static int rich_static, rich_w;   /* rc14: vista previa del teclado: sin animacion; ancho medido */
+static int rich_static, rich_w;   /* vista previa del teclado: sin animacion; ancho medido */
 int chat_rich(const void *fp, int x, int y, int maxw, const tchat_t *m, u32 namecol, u32 textcol, int draw) {
     const Font *f = (const Font *)fp;
     static tok_t t[MAXT];
@@ -174,7 +174,7 @@ int chat_rich(const void *fp, int x, int y, int maxw, const tchat_t *m, u32 name
     return (line + 1) * lh;
 }
 
-/* ---- rc14: campo de texto del teclado con los emotes como imagenes (estaticas) ----
+/* ---- campo de texto del teclado con los emotes como imagenes (estaticas) ----
  * Una sola linea; si no entra se muestra el final. Devuelve la x del cursor. */
 int emote_preview_draw(const tchat_t *m, int x, int y, int w) {
     rich_static = 1;
@@ -188,7 +188,7 @@ int emote_preview_draw(const tchat_t *m, int x, int y, int w) {
     return x - sh + tw + 2;
 }
 
-/* ---- rc14: grilla de emotes (selector del teclado del chat) ----
+/* ---- grilla de emotes (selector del teclado del chat) ----
  * Imagenes estaticas (primer cuadro) por el mismo cache acotado de thumbs.c.
  * Puntero o cruz para elegir, A inserta, B cierra, +/- o pestañas cambian de grupo. */
 int emote_grid(const char *title, const emo_item_t *it, int n, const char *const *gname, int ng, int *sel_io) {
@@ -267,11 +267,11 @@ int emote_grid(const char *title, const emo_item_t *it, int n, const char *const
         if (m > 0) {
             const emo_item_t *e = &it[idx[sel]];
             char l[120];
-            snprintf(l, sizeof l, "%s%s", e->name, e->locked ? "   (solo suscriptores)" : e->note[0] ? "   " : "");
+            snprintf(l, sizeof l, "%s%s", e->name, e->locked ? T("   (solo suscriptores)") : e->note[0] ? "   " : "");
             if (!e->locked && e->note[0]) snprintf(l + strlen(l), sizeof l - strlen(l), "(%s)", e->note);
             gfx_text_fit(&font_bold, px + 22, py + ph - 52, l, e->locked ? C_WARN : C_TEXT, pw - 44);
         }
-        gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, "A: insertar   B: cerrar   +/-: grupo   cruz: mover", C_FAINT);
+        gfx_text_c(&font_small, SCR_W / 2, py + ph - 22, T("A: insertar   B: cerrar   +/-: grupo   cruz: mover"), C_FAINT);
         ui_present();
         if (!done && (d & WPAD_BUTTON_A) && !UI.consumed && m > 0 && !hov_any) { res = idx[sel]; done = 1; }
         if (ng2 != grp) { grp = ng2; sel = 0; top = 0; }

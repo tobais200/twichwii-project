@@ -1,4 +1,4 @@
-/* TwitchWii 1.2-rc1: official rvl.ld + libogc_common.ld with FFmpeg TX
+/* TwitchWii: official rvl.ld + libogc_common.ld with FFmpeg TX
    tables placed in a MEM2 NOLOAD section that is NOT part of the :bss PHDR.
    Do not fold this section into MEM1 __bss_start/__bss_end. */
 /*--------------------------------------------------------------------------------

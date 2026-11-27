@@ -28,7 +28,7 @@ static int rgb_out(const unsigned char *rgb, int w, int h, int stride, kimg_t *o
     }
     out->w = ow; out->h = oh; out->px = px; return 1;
 }
-/* rc13: transparencia (emotes, avatares) sobre el fondo de paneles en vez de negro. */
+/* transparencia (emotes, avatares) sobre el fondo de paneles en vez de negro. */
 static int rgba_out(const unsigned char *rgba, int w, int h, int stride, kimg_t *out) {
     int ow, oh, x, y; dims(w, h, &ow, &oh);
     u32 *px = malloc(ow * oh * sizeof(u32));
@@ -53,7 +53,7 @@ static int from_jpeg(const unsigned char *data, unsigned size, kimg_t *out) {
     jpeg_read_header(&c, TRUE);
     if (!c.image_width || !c.image_height || c.image_width > 8192 || c.image_height > 8192) { jpeg_destroy_decompress(&c); return 0; }
     c.out_color_space = JCS_RGB;
-    /* rc13: escala DCT hasta la resolucion que se muestra (max 320x180):
+    /* escala DCT hasta la resolucion que se muestra (max 320x180):
        un banner de 2560x1440 se decodifica directo a 320x180 (1/8). */
     { int tw, th; dims(c.image_width, c.image_height, &tw, &th);
       c.scale_num = 1; c.scale_denom = 1;
@@ -138,7 +138,7 @@ static int webp_plain(const uint8_t *d, size_t n, kimg_t *out) {
     int ok = rgba_out(rgb, w, h, w * 4, out);
     WebPFree(rgb); return ok;
 }
-/* rc14: GIF completo (todos los cuadros, disposal 0-3, paletas locales, transparencia,
+/* GIF completo (todos los cuadros, disposal 0-3, paletas locales, transparencia,
  * entrelazado). Recorre los cuadros sobre un lienzo ARGB (A=0 transparente) y llama a cb
  * por cada uno. LZW acotado; el lienzo se limita a 512x512 (emotes). */
 typedef int (*frame_cb)(void *ctx, const u32 *cv, int w, int h, int delay_ms, int index);
@@ -279,7 +279,7 @@ static int from_gif(const unsigned char *d, unsigned n, kimg_t *out) {
     return ok;
 }
 
-/* ---- rc14: animacion reducida a la altura del chat (RGB565 + color clave) ---- */
+/* ---- animacion reducida a la altura del chat (RGB565 + color clave) ---- */
 typedef struct { kanim_t *a; int step, keep, src, th, tw, maxf, acc; } abuild_t;
 static int anim_cb(void *ctx, const u32 *cv, int sw, int sh, int dl, int i) {
     abuild_t *b = ctx; kanim_t *a = b->a;
@@ -382,7 +382,7 @@ int image_decode(const unsigned char *data, unsigned size, kimg_t *out) {
         WebPDecoderConfig cfg;
         if (!WebPInitDecoderConfig(&cfg) || WebPGetFeatures(data, size, &cfg.input) != VP8_STATUS_OK) return 0;
         if (cfg.input.width > 8192 || cfg.input.height > 8192) return 0;
-        if (cfg.input.has_animation) {   /* rc13: emotes animados -> primer cuadro */
+        if (cfg.input.has_animation) {   /* emotes animados -> primer cuadro */
             WebPData wd = { data, size }; int ok = 0;
             WebPDemuxer *dm = WebPDemux(&wd); WebPIterator it;
             if (dm && WebPDemuxGetFrame(dm, 1, &it)) {
