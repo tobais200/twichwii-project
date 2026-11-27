@@ -183,8 +183,10 @@ static inline u32 rgb2yuyv(u32 a, u32 b) {
 #ifdef KBD_BENCH
 unsigned gfx_last_conv_us;
 #endif
+static void cjk_fb_idle(void);
 void gfx_present(void) {
     guard_beat();
+    cjk_fb_idle();
 #ifdef KBD_BENCH
     u64 kb_pt0 = gettime();
 #endif
@@ -383,7 +385,43 @@ static int g_packed;                   /* 1 = 4-bit CJK bitmap */
 static int cjk_active = 0;
 static CjkSet cjk_cur[4];            /* glyph tables of the active CJK language (inside cjk_mem) */
 static unsigned char *cjk_mem = NULL;
-/* Inflate the glyph subset of the selected CJK language into the heap; free it for Latin languages. */
+static CjkSet cjk_fb[4];
+static unsigned char *cjk_fb_mem = NULL;
+static int cjk_fb_ok = 0, cjk_fb_failed = 0;
+static u64 cjk_fb_last_use = 0, cjk_fb_fail_at = 0;
+#define CJK_FB_IDLE_SECS 30u      /* free the common fallback after 30 s without a lookup in it */
+#define CJK_FB_RETRY_SECS 15u     /* after a failed inflate (no memory), try again at most this often */
+
+/* Check one inflated set table (big-endian header of 4 x {n, cp_off, glyph_off, bits_off})
+ * before using it: every array and every glyph bitmap must lie inside the inflated block. */
+static int cjk_set_ok(const unsigned char *m, unsigned len, int i, int allow_empty, CjkSet *out) {
+    const unsigned *h;
+    unsigned n, co, go, bo, blen, k;
+    const Glyph *g;
+    memset(out, 0, sizeof(*out));
+    if (len < 64) return 0;
+    h = (const unsigned *)(m + 16 * i);
+    n = h[0]; co = h[1]; go = h[2]; bo = h[3];
+    if (!n) return allow_empty;
+    if (n > 65536 || (co & 1) || (go & 3) || co > len || go > len || bo > len) return 0;
+    if ((unsigned long long)n * 2 > len - co || (unsigned long long)n * sizeof(Glyph) > len - go) return 0;
+    blen = len - bo; g = (const Glyph *)(m + go);
+    for (k = 0; k < n; k++) {
+        unsigned need;
+        if (g[k].w < 0 || g[k].h < 0 || g[k].w > 64 || g[k].h > 64 || g[k].off < 0) return 0;
+        need = ((unsigned)g[k].w * (unsigned)g[k].h + 1) / 2;
+        if ((unsigned)g[k].off > blen || need > blen - (unsigned)g[k].off) return 0;
+    }
+    out->n = (int)n; out->cp = (const unsigned short *)(m + co); out->g = g; out->bits = m + bo;
+    return 1;
+}
+static void cjk_fb_free(void) {
+    cjk_fb_ok = 0;
+    free(cjk_fb_mem); cjk_fb_mem = NULL;
+    memset(cjk_fb, 0, sizeof(cjk_fb));
+}
+/* Inflate the glyph subset of the selected CJK language into the heap; free it for Latin languages.
+ * Changing language also drops the ~913 KB common fallback; it is inflated again on the next miss. */
 void gfx_cjk_select(int set) {
     int i;
     if (set < 1 || set > 4) set = 0;
@@ -391,44 +429,37 @@ void gfx_cjk_select(int set) {
     cjk_active = 0;
     free(cjk_mem); cjk_mem = NULL;
     memset(cjk_cur, 0, sizeof(cjk_cur));
+    cjk_fb_free(); cjk_fb_failed = 0;
     if (!set) return;
     {
         uLongf len = cjk_rawlen[set - 1];
         unsigned char *m = malloc(len);
         if (!m) return;
         if (uncompress(m, &len, cjk_zdata[set - 1], cjk_zlen[set - 1]) != Z_OK || len != cjk_rawlen[set - 1]) { free(m); return; }
-        for (i = 0; i < 4; i++) {
-            const unsigned *h = (const unsigned *)(m + 16 * i);
-            cjk_cur[i].n = (int)h[0];
-            cjk_cur[i].cp = (const unsigned short *)(m + h[1]);
-            cjk_cur[i].g = (const Glyph *)(m + h[2]);
-            cjk_cur[i].bits = m + h[3];
-        }
+        for (i = 0; i < 4; i++)
+            if (!cjk_set_ok(m, (unsigned)len, i, 0, &cjk_cur[i])) { memset(cjk_cur, 0, sizeof(cjk_cur)); free(m); return; }
         cjk_mem = m; cjk_active = set;
     }
 }
-static CjkSet cjk_fb[4];
-static unsigned char *cjk_fb_mem = NULL;
-static int cjk_fb_ok = 0;
 static void cjk_fb_ensure(void) {
     int i;
-    if (cjk_fb_ok || !cjk_fb_zlen) return;
+    if (cjk_fb_ok || cjk_fb_failed || !cjk_fb_zlen) return;
     {
         uLongf len = cjk_fb_rawlen;
         unsigned char *m = malloc(len);
+        cjk_fb_failed = 1; cjk_fb_fail_at = gettime();   /* do not retry the 913 KB inflate on every glyph */
         if (!m) return;
         if (uncompress(m, &len, cjk_fb_z, cjk_fb_zlen) != Z_OK || len != cjk_fb_rawlen) { free(m); return; }
-        memset(cjk_fb, 0, sizeof(cjk_fb));
-        for (i = 0; i < 4; i++) {
-            const unsigned *h = (const unsigned *)(m + 16 * i);
-            if (!h[0]) continue;
-            cjk_fb[i].n = (int)h[0];
-            cjk_fb[i].cp = (const unsigned short *)(m + h[1]);
-            cjk_fb[i].g = (const Glyph *)(m + h[2]);
-            cjk_fb[i].bits = m + h[3];
-        }
-        cjk_fb_mem = m; cjk_fb_ok = 1;
+        for (i = 0; i < 4; i++)
+            if (!cjk_set_ok(m, (unsigned)len, i, 1, &cjk_fb[i])) { memset(cjk_fb, 0, sizeof(cjk_fb)); free(m); return; }
+        cjk_fb_mem = m; cjk_fb_ok = 1; cjk_fb_failed = 0; cjk_fb_last_use = gettime();
     }
+}
+/* Called from gfx_present (main thread, never while a glyph is being drawn). */
+static void cjk_fb_idle(void) {
+    u64 now = gettime();
+    if (cjk_fb_ok && ticks_to_secs(now - cjk_fb_last_use) >= CJK_FB_IDLE_SECS) cjk_fb_free();
+    if (cjk_fb_failed && !cjk_fb_ok && ticks_to_secs(now - cjk_fb_fail_at) >= CJK_FB_RETRY_SECS) cjk_fb_failed = 0;
 }
 static int cp_needs_cjk(int cp) {
     return (cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x2E80 && cp <= 0x9FFF)
@@ -436,27 +467,31 @@ static int cp_needs_cjk(int cp) {
         || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19)
         || (cp >= 0xFF00 && cp <= 0xFFEF);
 }
-/* Hollow box used when a CJK/Hangul/kana code point is still missing after the fallback set. */
-static unsigned char cjk_box4[64];
+/* Hollow box used when a CJK/Hangul/kana code point is still missing after the fallback set.
+ * 4-bit packed bitmap: two pixels per byte, so it needs ceil(W*H/2) bytes (12x13 -> 78). */
+#define CJK_BOX_W 12
+#define CJK_BOX_H 13
+#define CJK_BOX_ADV 14
+static unsigned char cjk_box4[(CJK_BOX_W * CJK_BOX_H + 1) / 2];
+typedef char cjk_box4_size_check[(sizeof(cjk_box4) * 2 >= CJK_BOX_W * CJK_BOX_H) ? 1 : -1];
 static Glyph cjk_box_g;
 static int cjk_box_ready = 0;
 static const Glyph *cjk_placeholder(const Font *f) {
-    int w, h, i, j, adv;
+    int i, j;
     if (!cjk_box_ready) {
-        w = 12; h = 13; adv = 14;
         memset(cjk_box4, 0, sizeof(cjk_box4));
-        for (j = 0; j < h; j++) for (i = 0; i < w; i++) {
-            int on = (j == 0 || j == h - 1 || i == 0 || i == w - 1);
-            if (!on) continue;
-            int n = j * w + i, a = 12; /* 4-bit */
-            unsigned char *p = &cjk_box4[n >> 1];
+        for (j = 0; j < CJK_BOX_H; j++) for (i = 0; i < CJK_BOX_W; i++) {
+            int on = (j == 0 || j == CJK_BOX_H - 1 || i == 0 || i == CJK_BOX_W - 1);
+            int n = j * CJK_BOX_W + i, a = 12; /* 4-bit alpha */
+            unsigned char *p;
+            if (!on || (unsigned)(n >> 1) >= sizeof(cjk_box4)) continue;
+            p = &cjk_box4[n >> 1];
             if (n & 1) *p = (*p & 0xF0) | a; else *p = (*p & 0x0F) | (a << 4);
         }
-        cjk_box_g.w = w; cjk_box_g.h = h; cjk_box_g.xoff = 1; cjk_box_g.yoff = -1;
-        cjk_box_g.adv = adv; cjk_box_g.off = 0;
+        cjk_box_g.w = CJK_BOX_W; cjk_box_g.h = CJK_BOX_H; cjk_box_g.xoff = 1; cjk_box_g.yoff = 0;
+        cjk_box_g.adv = CJK_BOX_ADV; cjk_box_g.off = 0;
         cjk_box_ready = 1;
     }
-    cjk_box_g.yoff = 0;
     (void)f;
     g_bits = cjk_box4; g_packed = 1;
     return &cjk_box_g;
@@ -487,6 +522,7 @@ static const Glyph *cjk_lookup(const Font *f, int cp) {
     /* Common fallback (body size, used for any font size with a y-offset). Lazy-inflated. */
     cjk_fb_ensure();
     if (cjk_fb_ok) {
+        cjk_fb_last_use = gettime();
         int fi2, try_sz;
         static const int base_asc_fb[4] = { 12, 13, 14, 28 };
         int prefer[] = { fi, 1, 2, 0, 3 };

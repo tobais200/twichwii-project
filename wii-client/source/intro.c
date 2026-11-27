@@ -156,7 +156,7 @@ static void draw(int ms, int out_ms) {
             int on = (ph == i || ph == i + 1);
             gfx_circle(SCR_W/2 - 16 + i * 16, 362, on ? 5 : 4, on ? 0xFFFFFF : 0x6A2FD0, 255);
         }
-        gfx_text_c(&font_small, SCR_W/2, 380, net_done ? (net_res ? T("Conectado") : T("Sin red")) : "Conectando...", 0xE6DAFF);
+        gfx_text_c(&font_small, SCR_W/2, 380, net_done ? (net_res ? T("Conectado") : T("Sin red")) : T("Conectando..."), 0xE6DAFF);
     }
     if (ms > 1800) {
         gfx_text_c(&font_small, SCR_W/2, 424, T("M\xc3\xbasica: Debussy, R\xc3\xaaverie - David Hernando Vitores (CC BY-SA 4.0)"), 0xD9C7FF);

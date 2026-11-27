@@ -110,7 +110,10 @@ static void *chat_thread(void *a) {
             char st[64] = "";
             const char *sv = jget(d, "status");
             if (sv) jstr(sv, st, sizeof(st));
-            snprintf(status, sizeof(status), "%s", st);
+            /* The companion server reports its IRC state in Spanish: show the known ones translated. */
+            if (!strncmp(st, "conectando", 10)) snprintf(status, sizeof(status), "%s", T("Conectando..."));
+            else if (!strncmp(st, "conectado", 9)) snprintf(status, sizeof(status), "%s", T("Conectado"));
+            else snprintf(status, sizeof(status), "%s", st);
             for (e = arr ? jarr_first(arr) : NULL; e; e = jarr_next(e)) {
                 char nm[28] = "", tx[200] = "", co[12] = "";
                 const char *v;
@@ -159,7 +162,7 @@ void chat_start(const char *who) {
     LWP_MutexLock(mtx); head = count = 0; gen++; LWP_MutexUnlock(mtx);
     snprintf(login, sizeof(login), "%s", who);
     authenticated=auth_irc_snapshot(authpass,sizeof(authpass),authnick,sizeof(authnick));
-    snprintf(status, sizeof(status), "conectando...");
+    snprintf(status, sizeof(status), "%s", T("Conectando..."));
     run = 1;
     th_body = k_server[0] && !authenticated ? chat_thread : direct_thread; th_done = 0;
     if (LWP_CreateThread(&th, th_wrap, NULL, NULL, 160 * 1024, 44) < 0) { th = LWP_THREAD_NULL; run = 0; th_done = 1; }

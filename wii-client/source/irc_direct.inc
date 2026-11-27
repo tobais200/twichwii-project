@@ -41,7 +41,7 @@ static void irc_tag(const char *line, const char *key, char *out, int sz) {
     }
 }
 static int irc_line(irc_conn *c, char *line) {
-    if (!strncmp(line, "HTTP/", 5)) { snprintf(status,sizeof(status),"IRC TCP rechazado; probando TLS/WSS..."); return 0; }
+    if (!strncmp(line, "HTTP/", 5)) { snprintf(status,sizeof(status),"%s",T("IRC TCP rechazado; probando TLS/WSS...")); return 0; }
     if (!strncmp(line, "PING ", 5)) { char pong[4104]; snprintf(pong, sizeof(pong), "PONG %s\r\n", line + 5); return irc_send(c, pong); }
     if (strstr(line, " RECONNECT")) return 0;
     if(strstr(line," 001 ")) {c->welcomed=1;snprintf(status,sizeof(status),T("IRC %s: conectado"),c->label);}

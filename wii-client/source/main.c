@@ -1482,7 +1482,7 @@ u32 at_hook(void) {
             phase=1; at_next();
         }
     } else if (phase==1) {
-        int ex = 52 + gfx_text_w(&font_bold, "Inicio") + 22 + 24;
+        int ex = 52 + gfx_text_w(&font_bold, T("Inicio")) + 22 + 24;
         at_ptr(ex, 16);
         if (at_ms()>2000) { b=WPAD_BUTTON_A; phase=2; at_next(); }
     } else if (phase==2) {
