@@ -22,6 +22,8 @@ typedef struct { int n; const unsigned short *cp; const Glyph *g; const unsigned
 extern const CjkSet cjk_names[4];                    /* language names: always available */
 extern const unsigned char *const cjk_zdata[4];       /* zlib blobs of the ja/zh/zt/ko sets, inflated only while active */
 extern const unsigned cjk_zlen[4], cjk_rawlen[4];
+extern const unsigned char cjk_fb_z[];   /* common JIS/GB/KS fallback, inflated on first miss */
+extern const unsigned cjk_fb_zlen, cjk_fb_rawlen;
 void gfx_cjk_select(int set);        /* 0 = none (Latin UI): only the language names can be drawn */
 
 extern u32 *canvas;                  /* 0x00RRGGBB */

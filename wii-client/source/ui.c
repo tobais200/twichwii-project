@@ -182,8 +182,37 @@ static void wait_release(void) {
 
 /* ---------------- teclado en pantalla ---------------- */
 #define KB_ROWS 4
-static const char *kb_rows[KB_ROWS] = { "1234567890", "qwertyuiop", "asdfghjkl\xf1", "zxcvbnm-_." };
-enum { K_SPACE, K_BACK, K_CLEAR, K_SHIFT, K_CANCEL, K_OK, K_EMOTE, K_NSPECIAL };
+enum { K_SPACE, K_BACK, K_CLEAR, K_SHIFT, K_ACCENT, K_CANCEL, K_OK, K_EMOTE, K_NSPECIAL };
+/* Per-language letter rows (10 chars, Latin-1). Only Spanish keeps ñ on the main layout.
+ * FR/DE/IT/NL/PT (and áéíóú in ES) use a dead key (áé) for accents; - and _ stay for slugs. */
+static const char *kb_rows_for(int row) {
+    static const char *en[KB_ROWS] = { "1234567890", "qwertyuiop", "asdfghjkl'", "zxcvbnm-_." };
+    static const char *es[KB_ROWS] = { "1234567890", "qwertyuiop", "asdfghjkl\xf1", "zxcvbnm-_." };
+    return (ui_lang == LANG_ES ? es : en)[row];
+}
+static int kb_has_accent(void) {
+    return ui_lang==LANG_ES || ui_lang==LANG_FR || ui_lang==LANG_DE
+        || ui_lang==LANG_IT || ui_lang==LANG_NL || ui_lang==LANG_PT;
+}
+static int kb_upper(int ch) {
+    if (ch >= 'a' && ch <= 'z') return ch - 32;
+    if (ch == 0xDF) return 0xDF;                 /* ß */
+    if (ch >= 0xE0 && ch <= 0xFE && ch != 0xF7) return ch - 0x20;
+    return ch;
+}
+static int kb_accent_apply(int ch, int shift) {
+    int l = ui_lang, base = ch;
+    if (base >= 'A' && base <= 'Z') base += 32;
+    #define P(lo, pri, sec) if (base==(lo)) return (shift?(sec):(pri))
+    if (l==LANG_ES) { P('a',0xE1,0xC1); P('e',0xE9,0xC9); P('i',0xED,0xCD); P('o',0xF3,0xD3); P('u',0xFA,0xFC); P('n',0xF1,0xD1); P('y',0xFD,0xDD); }
+    if (l==LANG_FR) { P('a',0xE0,0xE2); P('e',0xE9,0xE8); P('i',0xEE,0xEF); P('o',0xF4,0xF6); P('u',0xF9,0xFB); P('c',0xE7,0xC7); P('y',0xFF,0xFF); }
+    if (l==LANG_DE) { P('a',0xE4,0xC4); P('o',0xF6,0xD6); P('u',0xFC,0xDC); P('s',0xDF,0xDF); }
+    if (l==LANG_IT) { P('a',0xE0,0xE1); P('e',0xE8,0xE9); P('i',0xEC,0xED); P('o',0xF2,0xF3); P('u',0xF9,0xFA); }
+    if (l==LANG_NL) { P('a',0xE1,0xE4); P('e',0xE9,0xEB); P('i',0xED,0xEF); P('o',0xF3,0xF6); P('u',0xFA,0xFC); }
+    if (l==LANG_PT) { P('a',0xE1,0xE3); P('e',0xE9,0xEA); P('i',0xED,0xEC); P('o',0xF3,0xF4); P('u',0xFA,0xF9); P('c',0xE7,0xC7); P('n',0xF5,0xF5); }
+    #undef P
+    return 0;   /* no mapping: leave the pending accent and do not consume the key */
+}
 
 static void kb_char(char *buf, int max, int *len, int ch) {
     /* inserta Latin-1 como UTF-8 */
@@ -263,26 +292,51 @@ static void kbl(const char *fmt, ...) {
 #endif
 
 int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,const char *accept,const char *placeholder) {
-    int r = 1, c = 0, shift = 0, len = strlen(buf), done = -1, i, k;
+    int r = 1, c = 0, shift = 0, accent = 0, len = strlen(buf), done = -1, i, k;
     int px = (SCR_W-592)/2, py = 40, pw = 592, ph = 404;   /* 20 px mas: la ayuda ya no pisa la ultima fila */
-    const char *sl[K_NSPECIAL] = { T("Espacio"), T("Borrar"), T("Limpiar"), T("Mayus"), T("Cancelar"), T("Buscar"), T("Emotes") };
-    static const int sw0[K_NSPECIAL] = { 120, 84, 80, 70, 86, 84, 0 };
-    static const int sw1[K_NSPECIAL] = { 68, 80, 72, 64, 80, 80, 74 };   /* con la tecla Emotes: mismo ancho total */
+    const char *sl[K_NSPECIAL] = { T("Espacio"), T("Borrar"), T("Limpiar"), T("Mayus"), "áé", T("Cancelar"), T("Buscar"), T("Emotes") };
+    /* widths: with the accent key, Space shrinks so the row still fits */
     const int NK = KB_ROWS * 10 + K_NSPECIAL;
     /* geometria fija del teclado */
     int fx = px + 20, fy = py + 76, fw = pw - 40, fh = 44;
     int kw = 50, kh = 42, gap = 6, kx0 = px + (pw - (10 * kw + 9 * gap)) / 2, ky0 = py + 136;
-    int spx[K_NSPECIAL] = { 0 };
+    int spx[K_NSPECIAL] = { 0 }, swd[K_NSPECIAL] = { 0 };
     {
-        int has0 = sui_kb_emote_hook != NULL, nsp0 = has0 ? K_NSPECIAL : K_EMOTE;
-        const int *sw = has0 ? sw1 : sw0;
+        int has0 = sui_kb_emote_hook != NULL, nsp0 = has0 ? K_NSPECIAL : K_EMOTE, use_acc = kb_has_accent();
+        int rowW = 10 * kw + 9 * gap, pad, cnt = 0, sum, kk2;
+        /* widths follow the translated labels (+ icon room on Back/Search) so nothing is clipped in any language */
+        for (kk2 = 0; kk2 < nsp0; kk2++) if (!(kk2 == K_ACCENT && !use_acc)) cnt++;
+        for (pad = 22; ; pad -= 2) {
+            sum = gap * (cnt - 1);
+            for (kk2 = 0; kk2 < nsp0; kk2++) {
+                if (kk2 == K_ACCENT && !use_acc) { swd[kk2] = 0; continue; }
+                swd[kk2] = gfx_text_w(&font_bold, sl[kk2]) + pad + ((kk2 == K_BACK || kk2 == K_OK) ? 26 : 0);
+                if (swd[kk2] < 44) swd[kk2] = 44;
+                sum += swd[kk2];
+            }
+            if (sum <= rowW || pad <= 6) break;
+        }
+        if (sum > rowW) { /* last resort: trim Space, then the rest evenly */
+            int over = sum - rowW, t = swd[K_SPACE] - 44;
+            if (t > over) t = over;
+            swd[K_SPACE] -= t; over -= t;
+            for (kk2 = 0; over > 0 && kk2 < nsp0 * 4; kk2++) { int q = kk2 % nsp0; if (swd[q] > 40) { swd[q]--; over--; } }
+        } else if (sum < rowW && swd[K_SPACE] < 88) {
+            int add = rowW - sum; if (swd[K_SPACE] + add > 88) add = 88 - swd[K_SPACE];
+            swd[K_SPACE] += add;
+        }
+        const int *sw = swd;
         int sx = kx0;
-        for (k = 0; k < nsp0; k++) { if (k == K_EMOTE) sx = kx0 + 10 * kw + 9 * gap - sw[k]; spx[k] = sx; sx += sw[k] + gap; }
+        for (k = 0; k < nsp0; k++) {
+            if (k == K_ACCENT && !use_acc) { spx[k] = sx; continue; }
+            if (k == K_EMOTE) sx = kx0 + 10 * kw + 9 * gap - sw[k];
+            spx[k] = sx; sx += sw[k] + gap;
+        }
     }
     int sy = ky0 + KB_ROWS * (kh + gap) + 4;
     int need_full = 1, have_snap = 0;
     unsigned char kst[KB_ROWS * 10 + K_NSPECIAL];
-    unsigned kb_hash = 0; int kb_phase = -1, pcx = -1000, pcy = -1000, pcv = 0, pshift = 0;
+    unsigned kb_hash = 0; int kb_phase = -1, pcx = -1000, pcy = -1000, pcv = 0, pshift = 0, paccent = 0;
     memset(kst, 0xFF, sizeof kst);
 #ifdef KBD_BENCH
     unsigned kb_t_open = KBT(), kb_t_prev = kb_t_open, kb_frame = 0, kb_sum_draw[3] = {0}, kb_sum_pres[3] = {0}, kb_sum_conv[3] = {0}, kb_n[3] = {0}, kb_max[3] = {0}, kb_first = 0, kb_present_n[3] = {0}, kb_loop[3] = {0};
@@ -308,17 +362,22 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             if (key == 13) done = 1;
             else if (key == 27) done = 0;
             else if (key == 8) kb_back(buf, &len);
-            else if (key >= 32 && key < 127) kb_char(buf, max, &len, key);
+            else if (key >= 32 && key < 127) {
+                int kch = key;
+                if (accent) { int m = kb_accent_apply(kch, shift); if (m) { kch = m; accent = 0; } }
+                kb_char(buf, max, &len, kch);
+            }
         }
         if (d & WPAD_BUTTON_HOME) done = 0;
         if (d & WPAD_BUTTON_UP)    r = (r + KB_ROWS) % (KB_ROWS + 1);
         if (d & WPAD_BUTTON_DOWN)  r = (r + 1) % (KB_ROWS + 1);
         int has_emo = sui_kb_emote_hook != NULL, nsp = has_emo ? K_NSPECIAL : K_EMOTE;
-        const int *sw = has_emo ? sw1 : sw0;
+        const int *sw = swd;
         int cols = (r == KB_ROWS) ? nsp : 10;
         if (c >= cols) c = cols - 1;
-        if (d & WPAD_BUTTON_LEFT)  c = (c + cols - 1) % cols;
-        if (d & WPAD_BUTTON_RIGHT) c = (c + 1) % cols;
+        if (d & WPAD_BUTTON_LEFT)  do { c = (c + cols - 1) % cols; } while (r == KB_ROWS && c == K_ACCENT && !kb_has_accent());
+        if (d & WPAD_BUTTON_RIGHT) do { c = (c + 1) % cols; } while (r == KB_ROWS && c == K_ACCENT && !kb_has_accent());
+        if (r == KB_ROWS && c == K_ACCENT && !kb_has_accent()) c = (c + 1) % cols;
         if (d & WPAD_BUTTON_PLUS)  done = 1;
         if (d & WPAD_BUTTON_MINUS) done = 0;
         if (d & WPAD_BUTTON_B)     kb_back(buf, &len);
@@ -329,12 +388,14 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             int x = kx0 + k * (kw + gap), y = ky0 + i * (kh + gap);
             if (ui_hover(x, y, kw, kh)) { r = i; c = k; }
             if (ui_click(x, y, kw, kh)) {
-                unsigned char ch = kb_rows[i][k];
-                if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
+                unsigned char ch = (unsigned char)kb_rows_for(i)[k];
+                if (accent) { int m = kb_accent_apply(ch, shift); if (m) { ch = (unsigned char)m; accent = 0; } else if (shift) ch = kb_upper(ch); }
+                else if (shift) ch = kb_upper(ch);
                 fire = 1000 + ch;
             }
         }
         for (k = 0; k < nsp; k++) {
+            if (k == K_ACCENT && !kb_has_accent()) continue;
             if (ui_hover(spx[k], sy, sw[k], kh)) { r = KB_ROWS; c = k; }
             if (ui_click(spx[k], sy, sw[k], kh)) fire = k;
         }
@@ -379,13 +440,13 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
             } else if (have_snap) {
                 if (ptr_chg) { if (pcv) KB_CURSOR_RECT(L, &nl, pcx, pcy); if (in_ptr.valid) KB_CURSOR_RECT(L, &nl, in_ptr.x, in_ptr.y); }
                 if (text_chg) kb_rect_add(L, &nl, fx, fy, fx + fw, fy + fh);
-                if (shift != pshift) kb_rect_add(L, &nl, kx0 - 3, ky0 - 3, kx0 + 10 * kw + 9 * gap + 3, sy + kh + 4);   /* Mayus: cambian todas las letras */
+                if (shift != pshift || accent != paccent) kb_rect_add(L, &nl, kx0 - 3, ky0 - 3, kx0 + 10 * kw + 9 * gap + 3, sy + kh + 4);
             }
             /* estado de cada tecla: bit0 foco, bit1 puntero encima, bit2 apretada */
             if (have_snap || !kb_snap) for (i = 0; i < NK; i++) {
                 int x, y, w;
                 if (i < KB_ROWS * 10) { x = kx0 + (i % 10) * (kw + gap); y = ky0 + (i / 10) * (kh + gap); w = kw; }
-                else { int kk = i - KB_ROWS * 10; if (kk >= nsp) { kst[i] = 0; continue; } x = spx[kk]; y = sy; w = sw[kk]; }
+                else { int kk = i - KB_ROWS * 10; if (kk >= nsp || (kk == K_ACCENT && !kb_has_accent())) { kst[i] = 0; continue; } x = spx[kk]; y = sy; w = sw[kk]; }
                 int foc = i < KB_ROWS * 10 ? (r == i / 10 && c == i % 10) : (r == KB_ROWS && c == i - KB_ROWS * 10);
                 int hov = ui_hover(x, y, w, kh);
                 unsigned char st = (foc ? 1 : 0) | (hov ? 2 : 0) | (hov && (in_ptr.held & WPAD_BUTTON_A) ? 4 : 0);
@@ -419,16 +480,17 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
                             int ri = i / 10, ci = i % 10;
                             x = kx0 + ci * (kw + gap); y = ky0 + ri * (kh + gap); w = kw;
                             if (!kb_isect(R, x - 3, y - 3, x + w + 3, y + kh + 4)) continue;
-                            unsigned char ch = kb_rows[ri][ci];
-                            if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
+                            unsigned char ch = kb_rows_for(ri)[ci];
+                            if (shift) ch = kb_upper(ch);
                             if (ch < 0x80) lb[0] = ch; else { lb[0] = 0xC0 | (ch >> 6); lb[1] = 0x80 | (ch & 0x3F); }
                             lab = lb; foc = (r == ri && c == ci);
                         } else {
                             int kk = i - KB_ROWS * 10;
                             if (kk >= nsp) continue;
+                            if (kk == K_ACCENT && !kb_has_accent()) continue;
                             x = spx[kk]; y = sy; w = sw[kk];
                             if (!kb_isect(R, x - 3, y - 3, x + w + 3, y + kh + 4)) continue;
-                            st = kk == K_OK ? BS_ACCENT : (kk == K_SHIFT && shift ? BS_ACCENT : BS_NORMAL);
+                            st = kk == K_OK ? BS_ACCENT : ((kk == K_SHIFT && shift) || (kk == K_ACCENT && accent) ? BS_ACCENT : BS_NORMAL);
                             ic = kk == K_OK ? IC_SEARCH : (kk == K_BACK ? IC_BACK : 0);
                             lab = kk == K_OK ? accept : sl[kk]; foc = (r == KB_ROWS && c == kk);
                         }
@@ -454,7 +516,7 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
                 gfx_noclip();
                 VIDEO_WaitVSync();   /* sin cambios: no se dibuja ni se presenta nada */
             }
-            kb_hash = h; kb_phase = phase; pcv = in_ptr.valid; pcx = in_ptr.x; pcy = in_ptr.y; pshift = shift;
+            kb_hash = h; kb_phase = phase; pcv = in_ptr.valid; pcx = in_ptr.x; pcy = in_ptr.y; pshift = shift; paccent = accent;
             need_full = !have_snap;   /* sin copia (MEM2 llena): se redibuja todo como antes */
         }
 #ifdef KBD_BENCH
@@ -478,13 +540,18 @@ int sui_text_input_ex(const char *title, const char *hint, char *buf, int max,co
         if (fire < 0 && (d & WPAD_BUTTON_A) && !UI.consumed)
             fire = r < KB_ROWS ? -2 : c;
         if (fire == -2) {
-            unsigned char ch = kb_rows[r][c];
-            if (shift && ((ch >= 'a' && ch <= 'z') || ch == 0xF1)) ch -= 32;
+            unsigned char ch = (unsigned char)kb_rows_for(r)[c];
+            if (accent) {
+                int m = kb_accent_apply(ch, shift);
+                if (m) { ch = (unsigned char)m; accent = 0; }
+                else if (shift) ch = kb_upper(ch);
+            } else if (shift) ch = kb_upper(ch);
             fire = 1000 + ch;
         }
         if (fire >= 1000) kb_char(buf, max, &len, fire - 1000);
         else switch (fire) {
             case K_SPACE:  kb_char(buf, max, &len, ' '); break;
+            case K_ACCENT: if (kb_has_accent()) accent = !accent; break;
             case K_BACK:   kb_back(buf, &len); break;
             case K_CLEAR:  len = 0; buf[0] = 0; break;
             case K_SHIFT:  shift = !shift; break;
@@ -647,7 +714,7 @@ u32 sui_text_view(const char *title, const char *help, const char *text) {
             if (scroll < 0) scroll = 0;
         }
         gfx_text(&font_small, px + 120, by + 8, help ? help : T("A/B: volver"), C_FAINT);
-        int ok = ui_button(px + pw - 120, by, 100, 30, "OK", IC_OK, BS_ACCENT, !in_ptr.valid);
+        int ok = ui_button(px + pw - 120, by, 100, 30, T("OK"), IC_OK, BS_ACCENT, !in_ptr.valid);
         ui_present();
         if (ok) { ret = WPAD_BUTTON_A; break; }
         if (UI.consumed) continue;
@@ -678,8 +745,8 @@ int sui_confirm(const char *title, const char *text) {
         ui_panel(px, py, pw, ph, title);
         for (i = 0; i < n; i++) gfx_text(&font_body, px + 24, py + 58 + i * 19, lines[i], C_TEXT);
         int by = py + ph - 46;
-        if (ui_button(px + pw - 240, by, 100, 32, "Si", IC_OK, BS_ACCENT, foc == 0)) res = 1;
-        if (ui_button(px + pw - 128, by, 100, 32, "No", IC_BACK, BS_NORMAL, foc == 1)) res = 0;
+        if (ui_button(px + pw - 240, by, 100, 32, T("Si"), IC_OK, BS_ACCENT, foc == 0)) res = 1;
+        if (ui_button(px + pw - 128, by, 100, 32, T("No"), IC_BACK, BS_NORMAL, foc == 1)) res = 0;
         ui_present();
         if (res >= 0 || UI.consumed) continue;
         if (d & WPAD_BUTTON_A) res = foc == 0;

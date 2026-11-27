@@ -102,7 +102,7 @@ p("HOME = cancelar","HOME = cancel","HOME = annuler","HOME = abbrechen","HOME = 
 p("Espacio","Space","Espace","Leer","Spazio","Spatie","Espaço")
 p("Borrar","Delete","Effacer","Löschen","Cancella","Wissen","Apagar")
 p("Limpiar","Clear","Vider","Leeren","Svuota","Leeg","Limpar")
-p("Mayus","Shift","Maj","Umsch","Maiusc","Shift","Shift")
+p("Mayus","Shift","Maj","Umsch","Maiusc","Shift","Maiúsc")
 p("Cancelar","Cancel","Annuler","Abbruch","Annulla","Annul.","Cancelar")
 p("A: tecla   B: borrar   +: aceptar","A: key   B: delete   +: accept   -: cancel   2: emotes","A : touche   B : effacer   + : valider   - : annuler   2 : émotes","A: Taste   B: löschen   +: OK   -: abbrechen   2: Emotes","A: tasto   B: cancella   +: conferma   -: annulla   2: emote","A: toets   B: wissen   +: OK   -: annuleren   2: emotes","A: tecla   B: apagar   +: aceitar   -: cancelar   2: emotes")
 p("A: tecla   B: borrar   +: buscar","A: key   B: delete   +: search   -: cancel   (USB keyboard too)","A : touche   B : effacer   + : rechercher   - : annuler   (clavier USB aussi)","A: Taste   B: löschen   +: suchen   -: abbrechen   (auch USB-Tastatur)","A: tasto   B: cancella   +: cerca   -: annulla   (anche tastiera USB)","A: toets   B: wissen   +: zoeken   -: annuleren   (ook USB-toetsenbord)","A: tecla   B: apagar   +: buscar   -: cancelar   (também teclado USB)")
@@ -115,3 +115,5 @@ p("Estado sin consultar","Status not checked","État non vérifié","Status nich
 p("Si","Yes","Oui","Ja","Sì","Ja","Sim")
 p("No","No","Non","Nein","No","Nee","Não")
 p("Siguiendo","Following","Suivi","Gefolgt","Seguito","Gevolgd","Seguindo")
+
+p("OK","OK","OK","OK","OK","OK","OK")

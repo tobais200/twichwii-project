@@ -806,7 +806,7 @@ static void draw_browse(void) {
         gfx_text_fit(&font_small, MX + w1 + w2 + 40, ty + 4, qlab, C_DIM, MW - w1 - w2 - 50);
     } else {
         char qlab[64];
-        snprintf(qlab, sizeof(qlab), T("%d categor\xc3\xad" "as%s"), bcats.n, bcats_more ? T("  \xc2\xb7  scroll para mas") : "");
+        snprintf(qlab, sizeof(qlab), T("%d categor\xc3\xad" "as%s"), bcats.n, bcats_more ? T("  \xc2\xb7  m\xc3\xa1s") : "");
         gfx_text_fit(&font_small, MX + w1 + w2 + 40, ty + 4, qlab, C_DIM, MW - w1 - w2 - 50);
     }
     gfx_rect(MX, ty + 25, MW, 1, C_LINE);
@@ -1351,7 +1351,7 @@ static void language_settings(void) {
     char *items[LANG_COUNT];
     int choice = ui_lang, i;
     for (i = 0; i < LANG_COUNT; i++) items[i] = (char *)lang_native_name(i);
-    u32 r = sui_list("Language / Idioma", T("A: aplicar   B: volver"), items, LANG_COUNT, &choice);
+    u32 r = sui_list(T("Idioma de la interfaz"), T("A: aplicar   B: volver"), items, LANG_COUNT, &choice);
     if (r == WPAD_BUTTON_HOME) { quit = 1; return; }
     if (r != WPAD_BUTTON_A) return;
     if (choice != ui_lang) {
@@ -1383,7 +1383,7 @@ static void settings(void) {
         snprintf(it[8], 160, T("Salir al Homebrew Channel"));
         snprintf(it[9], 160, "%s\n%s", display_title(), display_choice(gfx_aspect_mode()));
         snprintf(it[10],160,T("Cuenta / Iniciar sesi\xc3\xb3n\n%s"),auth_status());
-        snprintf(it[11],160,"%s / Language\n%s",T("Idioma de la interfaz"),lang_native_name(ui_lang));
+        snprintf(it[11],160,"%s\n%s",T("Idioma de la interfaz"),lang_native_name(ui_lang));
         items[0]=it[10];
         items[1]=it[11];
         items[2]=it[9];

@@ -407,6 +407,60 @@ void gfx_cjk_select(int set) {
         cjk_mem = m; cjk_active = set;
     }
 }
+static CjkSet cjk_fb[4];
+static unsigned char *cjk_fb_mem = NULL;
+static int cjk_fb_ok = 0;
+static void cjk_fb_ensure(void) {
+    int i;
+    if (cjk_fb_ok || !cjk_fb_zlen) return;
+    {
+        uLongf len = cjk_fb_rawlen;
+        unsigned char *m = malloc(len);
+        if (!m) return;
+        if (uncompress(m, &len, cjk_fb_z, cjk_fb_zlen) != Z_OK || len != cjk_fb_rawlen) { free(m); return; }
+        memset(cjk_fb, 0, sizeof(cjk_fb));
+        for (i = 0; i < 4; i++) {
+            const unsigned *h = (const unsigned *)(m + 16 * i);
+            if (!h[0]) continue;
+            cjk_fb[i].n = (int)h[0];
+            cjk_fb[i].cp = (const unsigned short *)(m + h[1]);
+            cjk_fb[i].g = (const Glyph *)(m + h[2]);
+            cjk_fb[i].bits = m + h[3];
+        }
+        cjk_fb_mem = m; cjk_fb_ok = 1;
+    }
+}
+static int cp_needs_cjk(int cp) {
+    return (cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x2E80 && cp <= 0x9FFF)
+        || (cp >= 0xA960 && cp <= 0xA97F) || (cp >= 0xAC00 && cp <= 0xD7AF)
+        || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19)
+        || (cp >= 0xFF00 && cp <= 0xFFEF);
+}
+/* Hollow box used when a CJK/Hangul/kana code point is still missing after the fallback set. */
+static unsigned char cjk_box4[64];
+static Glyph cjk_box_g;
+static int cjk_box_ready = 0;
+static const Glyph *cjk_placeholder(const Font *f) {
+    int w, h, i, j, adv;
+    if (!cjk_box_ready) {
+        w = 12; h = 13; adv = 14;
+        memset(cjk_box4, 0, sizeof(cjk_box4));
+        for (j = 0; j < h; j++) for (i = 0; i < w; i++) {
+            int on = (j == 0 || j == h - 1 || i == 0 || i == w - 1);
+            if (!on) continue;
+            int n = j * w + i, a = 12; /* 4-bit */
+            unsigned char *p = &cjk_box4[n >> 1];
+            if (n & 1) *p = (*p & 0xF0) | a; else *p = (*p & 0x0F) | (a << 4);
+        }
+        cjk_box_g.w = w; cjk_box_g.h = h; cjk_box_g.xoff = 1; cjk_box_g.yoff = -1;
+        cjk_box_g.adv = adv; cjk_box_g.off = 0;
+        cjk_box_ready = 1;
+    }
+    cjk_box_g.yoff = 0;
+    (void)f;
+    g_bits = cjk_box4; g_packed = 1;
+    return &cjk_box_g;
+}
 static const Glyph *cjk_lookup(const Font *f, int cp) {
     static Glyph tmp;
     int fi = f == &font_small ? 0 : f == &font_body ? 1 : (f == &font_big ? 3 : 2), pass;
@@ -430,12 +484,38 @@ static const Glyph *cjk_lookup(const Font *f, int cp) {
             if (try_sz == 3) try_sz = 2; else break;   /* big falls back to the 16px bold glyph */
         }
     }
+    /* Common fallback (body size, used for any font size with a y-offset). Lazy-inflated. */
+    cjk_fb_ensure();
+    if (cjk_fb_ok) {
+        int fi2, try_sz;
+        static const int base_asc_fb[4] = { 12, 13, 14, 28 };
+        int prefer[] = { fi, 1, 2, 0, 3 };
+        for (fi2 = 0; fi2 < 5; fi2++) {
+            const CjkSet *c;
+            int lo, hi;
+            try_sz = prefer[fi2];
+            c = &cjk_fb[try_sz];
+            if (!c->n) continue;
+            lo = 0; hi = c->n - 1;
+            while (lo <= hi) {
+                int mid = (lo + hi) >> 1;
+                if (c->cp[mid] == cp) {
+                    tmp = c->g[mid];
+                    tmp.yoff += f->ascent - base_asc_fb[try_sz];
+                    g_bits = c->bits; g_packed = 1;
+                    return &tmp;
+                }
+                if (c->cp[mid] < cp) lo = mid + 1; else hi = mid - 1;
+            }
+        }
+    }
     return NULL;
 }
 static const Glyph *glyph(const Font *f, int cp) {
     if (cp > 255) {
         const Glyph *c = cjk_lookup(f, cp);
         if (c) return c;
+        if (cp_needs_cjk(cp)) return cjk_placeholder(f);
     }
     if (cp < 32 || cp > 255 || (cp >= 127 && cp < 160)) cp = '?';
     g_bits = f->bits; g_packed = 0;

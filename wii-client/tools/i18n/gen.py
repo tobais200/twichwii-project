@@ -39,9 +39,9 @@ _ord=sorted(ks,key=lambda x:x.encode('utf8'))
 cjk_key={order[i][0]:cjk[i] for i in range(len(order))}
 ns={}; exec(open(HERE+'/cjk/extra.py',encoding='utf8').read(),ns)
 def find_cjk(k):
-    if k in cjk_key: return cjk_key[k]
     for pre,v in ns['X'].items():
-        if k.startswith(pre): return (None,)+tuple(v)
+        if k == pre or k.startswith(pre): return (None,)+tuple(v)
+    if k in cjk_key: return cjk_key[k]
     for ok,v in cjk_key.items():
         if ok.startswith('Software: FFmpeg') and k.startswith('Software: FFmpeg'): return v
     return None

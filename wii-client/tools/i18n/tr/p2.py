@@ -56,7 +56,7 @@ p("Categorías","Categories","Catégories","Kategorien","Categorie","Categorieë
 p("Todas","All","Toutes","Alle","Tutte","Alle","Todas")
 p("Busqueda: %s (%d)","Search: %s (%d)","Recherche : %s (%d)","Suche: %s (%d)","Ricerca: %s (%d)","Zoeken: %s (%d)","Busca: %s (%d)")
 p("%d categorías%s","%d categories%s","%d catégories%s","%d Kategorien%s","%d categorie%s","%d categorieën%s","%d categorias%s")
-p("  ·  scroll para mas","  ·  scroll for more","  ·  défilez pour plus","  ·  scrollen für mehr","  ·  scorri per altro","  ·  scroll voor meer","  ·  role para ver mais")
+p("  ·  más","  ·  more","  ·  plus","  ·  mehr","  ·  altro","  ·  meer","  ·  mais")
 p("0 espectadores","0 viewers","0 spectateur","0 Zuschauer","0 spettatori","0 kijkers","0 espectadores")
 p("%s espectadores","%s viewers","%s spectateurs","%s Zuschauer","%s spettatori","%s kijkers","%s espectadores")
 p("Sin categorías","No categories","Aucune catégorie","Keine Kategorien","Nessuna categoria","Geen categorieën","Sem categorias")

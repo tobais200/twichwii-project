@@ -77,5 +77,65 @@ for si,S in enumerate(SETS[1:],1):
     z=zlib.compress(raw,9); zl.append(len(z)); rl.append(len(raw)); tot+=len(z)
     out.append('static const unsigned char cjk_z%d[]={%s};\n'%(si,','.join(map(str,z))))
 out.append('const unsigned char *const cjk_zdata[4]={cjk_z1,cjk_z2,cjk_z3,cjk_z4};\nconst unsigned cjk_zlen[4]={%s};\nconst unsigned cjk_rawlen[4]={%s};\n'%(','.join(map(str,zl)),','.join(map(str,rl))))
+
+# ---- shared fallback: JIS X 0208 level-1 kanji + GB2312 level-1 hanzi + KS X 1001 hangul + kana,
+# rasterised at body size only (15px Regular). Inflated on first missing CJK code point.
+def fallback_chars():
+    s=set()
+    for ku in range(16,48):
+        for ten in range(1,95):
+            try:
+                ch=bytes([0xA0+ku,0xA0+ten]).decode('euc-jp')
+                if len(ch)==1 and '\u4e00'<=ch<='\u9fff': s.add(ch)
+            except Exception:
+                pass
+    for r in range(0xB0,0xD8):
+        for c in range(0xA1,0xFF):
+            try:
+                ch=bytes([r,c]).decode('gb2312')
+                if len(ch)==1 and '\u4e00'<=ch<='\u9fff': s.add(ch)
+            except Exception:
+                pass
+    for r in range(0xB0,0xC9):
+        for c in range(0xA1,0xFF):
+            try:
+                ch=bytes([r,c]).decode('euc-kr')
+                if len(ch)==1 and '\uac00'<=ch<='\ud7a3': s.add(ch)
+            except Exception:
+                pass
+    s |= set(chr(i) for i in list(range(0x3041,0x3097))+list(range(0x30A1,0x30FB))+[0x30FC,0x3005,0x3001,0x3002,0x30FB,0x300C,0x300D,0x300E,0x300F])
+    s |= set('、。・「」『』（）【】…—ー！？〜〈〉《》')
+    return sorted(s, key=ord)
+def fb_idx(ch):
+    if '\uac00'<=ch<='\ud7a3' or '\u1100'<=ch<='\u11ff': return 1
+    return 0
+fb=fallback_chars()
+# 4 size slots, only body (index 1, Regular 15 / ascent 13) is filled
+sizes_fb=[]
+for si,(sn,w,em,asc,bigonly) in enumerate(SIZES):
+    if si!=1:
+        sizes_fb.append(([],[],b'')); continue
+    cps=[];gl=[];bits=bytearray()
+    for ch in fb:
+        r=raster(ch,w,fb_idx(ch),em,asc)
+        cps.append(ord(ch)); gl.append((r[0],r[1],r[2],r[3],r[4],len(bits))); bits+=r[5]
+    sizes_fb.append((cps,gl,bytes(bits)))
+body=b''; hdr=[]
+def addfb(b):
+    global body
+    o=64+len(body); body+=b; body+=b'\0'*((-len(body))%4); return o
+for cps,gl,bits in sizes_fb:
+    if not cps:
+        hdr.append(struct.pack('>IIII',0,0,0,0)); continue
+    co=addfb(struct.pack('>%dH'%len(cps),*cps)); go=addfb(b''.join(struct.pack('>hhhhhxxi',*g) for g in gl)); bo=addfb(bits)
+    hdr.append(struct.pack('>IIII',len(cps),co,go,bo))
+raw=b''.join(hdr)+body
+z=zlib.compress(raw,9)
+out.append('const unsigned char cjk_fb_z[]={%s};\n'%(','.join(map(str,z))))
+# expose with the names gfx.c expects
+# (re-declare as the extern const — use the static array name cjk_fb_z already)
+out.append('const unsigned cjk_fb_zlen=%d;\nconst unsigned cjk_fb_rawlen=%d;\n'%(len(z),len(raw)))
+print('fallback chars',len(fb),'z',len(z),'raw',len(raw))
+
 open(HERE+'/../../source/cjk_data.c','w').write(''.join(out))
 print('compressed',zl,'raw',rl,'total z',tot)
